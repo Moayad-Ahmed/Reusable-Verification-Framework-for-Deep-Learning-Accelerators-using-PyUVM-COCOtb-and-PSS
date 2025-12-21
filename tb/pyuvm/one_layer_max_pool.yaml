@@ -1,0 +1,10 @@
+test_suite:
+  - name: "One Layer Max Pooling"
+    layers:
+      - type: pooling
+        config:
+          kernel_size: 2
+          stride: 2
+          pool_type: max
+          input_shape: [28, 28]
+          data_range: [0, 255]
