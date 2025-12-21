@@ -1,4 +1,4 @@
-# Reusable Verification Framework for Deep Learning Accelerators using PyUVM, COCOtb and PSS
+# Reusable Verification Framework for Deep Learning Accelerators using PyUVM, Cocotb and PSS
 
 This repository presents a project focused on the development of a reusable, scalable, and portable verification framework for Deep Neural Network (DNN) hardware accelerators. The primary goal is to significantly reduce the verification effort required across different DNN accelerator designs by introducing a generic and modular testbench architecture.
 
