@@ -2,6 +2,7 @@ from pyuvm import *
 from seq_item import GenericLayerTransaction
 import yaml
 from Layer_Factory import LayerFactory
+from tb.pyuvm.pooling_strategy import PoolingStrategy
 
 
 class ConfigDrivenSequence(uvm_sequence):
@@ -18,6 +19,7 @@ class ConfigDrivenSequence(uvm_sequence):
             
             for layer_spec in test_suite['layers']:
                 # Create strategy from factory
+                LayerFactory.register_strategy('pooling',PoolingStrategy)
                 strategy = LayerFactory.create_strategy(layer_spec['type'])
                 
                 for i in range(10):
