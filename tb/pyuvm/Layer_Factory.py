@@ -4,7 +4,7 @@ class LayerFactory:
     """Factory to create layer strategies"""
     
     _strategies = {
-        'pooling': PoolingStrategy
+        #'pooling': PoolingStrategy
         # Add more as you implement them
     }
     
