@@ -1,12 +1,5 @@
-from LayerStrategy import LayerStrategy
-import torch
-import torch.nn as nn
-from cocotb.triggers import RisingEdge
-import numpy as np
-import random
-
 class FullyConnectedStrategy(LayerStrategy):
-    """Strategy for fully connected (linear/dense) layers"""
+    """Strategy for INT8 fully connected (linear/dense) layers"""
     
     def __init__(self):
         pass
@@ -15,10 +8,6 @@ class FullyConnectedStrategy(LayerStrategy):
         return "fully_connected"
     
     def generate_config(self):
-        """
-        Generate random but valid FC layer configuration.
-        """
-        # Common FC layer sizes in neural networks
         input_sizes = [128, 256, 512, 784, 1024]
         output_sizes = [10, 64, 128, 256, 512]
         
@@ -26,73 +15,51 @@ class FullyConnectedStrategy(LayerStrategy):
             'input_size': np.random.choice(input_sizes),
             'output_size': np.random.choice(output_sizes),
             'use_bias': True,
-            'data_range': (-128, 127),  # 8-bit signed data
-            'weight_range': (-128, 127)  # 8-bit signed weights
+            'data_range': (-128, 127),
+            'weight_range': (-128, 127)
         }
         return config
     
     def generate_input_data(self, config):
-        """
-        Generate random input vector, weights, and bias for FC layer.
-        
-        config = {
-            'input_size': 256,
-            'output_size': 10,
-            'use_bias': True,
-            'data_range': (-128, 127),
-            'weight_range': (-128, 127)
-        }
-        
-        Returns dict with:
-            - 'input': input vector [input_size]
-            - 'weights': weight matrix [output_size, input_size]
-            - 'bias': bias vector [output_size]
-        """
         input_size = config['input_size']
         output_size = config['output_size']
         data_low, data_high = config['data_range']
         weight_low, weight_high = config['weight_range']
         
-        # Generate random input vector (1D)
-        input_data = np.random.randint(data_low, data_high + 1, size=input_size)
+        # Ensure all generated data is explicitly int8
+        input_data = np.random.randint(data_low, data_high + 1, size=input_size, dtype=np.int8)
+        weights = np.random.randint(weight_low, weight_high + 1, size=(output_size, input_size), dtype=np.int8)
         
-        # Generate random weights (2D matrix: output_size x input_size)
-        weights = np.random.randint(weight_low, weight_high + 1, 
-                                   size=(output_size, input_size))
-        
-        # Generate random bias (1D)
         if config['use_bias']:
-            bias = np.random.randint(data_low, data_high + 1, size=output_size)
+            bias = np.random.randint(data_low, data_high + 1, size=output_size, dtype=np.int8)
         else:
-            bias = np.zeros(output_size, dtype=np.int32)
+            bias = np.zeros(output_size, dtype=np.int8)
         
         return {
-            'input': input_data.astype(np.int32),
-            'weights': weights.astype(np.int32),
-            'bias': bias.astype(np.int32)
+            'input': input_data,
+            'weights': weights,
+            'bias': bias
         }
     
     def compute_golden(self, data_dict, config):
         """
-        Golden model that matches 8-bit Integer Hardware for FC layer.
-        
-        Computation: output = (input @ weights.T) + bias
-        
-        Uses pure integer arithmetic to match hardware exactly.
+        Golden model for INT8 Hardware.
+        Note: Intermediate accumulation usually happens in INT32 to prevent overflow,
+        but the final result is truncated/saturated back to INT8 for the DUT.
         """
-        input_data = data_dict['input']
-        weights = data_dict['weights']
-        bias = data_dict['bias']
+        # Cast to int32 for the dot product calculation to avoid overflow mid-sum
+        input_data = data_dict['input'].astype(np.int32)
+        weights = data_dict['weights'].astype(np.int32)
+        bias = data_dict['bias'].astype(np.int32)
         
-        # Matrix multiply: output[i] = sum(input[j] * weights[i][j]) for all j
-        # Shape: (output_size,) = (output_size, input_size) @ (input_size,)
-        output = np.matmul(weights, input_data)  # Integer multiplication
+        # Matrix multiply: (output_size, input_size) @ (input_size,)
+        output = np.matmul(weights, input_data)
         
-        # Add bias
         if config['use_bias']:
             output = output + bias
         
-        # Clip to valid 32-bit accumulator range
-        output = np.clip(output, -(2**31), 2**31 - 1)
+        # --- INT8 SATURATION ---
+        # Hardware typically clamps values that exceed 8-bit bounds
+        output_int8 = np.clip(output, -128, 127)
         
-        return output.astype(np.int32)
+        return output_int8.astype(np.int8)
