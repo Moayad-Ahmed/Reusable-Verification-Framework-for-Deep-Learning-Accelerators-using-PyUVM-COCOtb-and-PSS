@@ -1,0 +1,26 @@
+test_suite:
+  - name: "Conv Pool Layer"
+    layers:
+      # Layer 1: Simple convolution on 28x28 input -> 14x14 output
+      - type: convolution
+        config:
+          kernel_size: 2
+          stride: 2
+          padding: 0
+          input_shape: [28, 28]
+          input_channels: 1
+          output_channels: 1
+          data_range: [0, 255]
+          weight_range: [-1, 1]
+          activation: none
+          quantize_weights: true
+          quantize_output: true
+      
+      # Layer 2: Avg pooling on 14x14 input -> 7x7 output
+      - type: pooling
+        config:
+          kernel_size: 2
+          stride: 2
+          pool_type: avg
+          input_shape: [14, 14]
+          data_range: [0, 255]

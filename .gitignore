@@ -1,0 +1,5 @@
+*.ini
+*.xml
+transcript
+pyuvm_components/__pycache__/
+sim_build/

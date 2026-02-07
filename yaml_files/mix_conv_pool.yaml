@@ -1,0 +1,65 @@
+test_suite:
+  - name: "Conv Pool (Varied Params)"
+    layers:
+      # C1: 3x3 kernel, stride 1, padding 1 (same-padding) -> 32x32 stays 32x32
+      - type: convolution
+        config:
+          kernel_size: 3
+          stride: 1
+          padding: 1
+          input_shape: [32, 32]
+          input_channels: 1
+          output_channels: 1
+          data_range: [0, 255]
+          weight_range: [-1, 1]
+          activation: none
+          quantize_weights: true
+          quantize_output: true
+
+      # S2: Average Pooling 32x32 -> 16x16
+      - type: pooling
+        config:
+          kernel_size: 2
+          stride: 2
+          pool_type: avg
+          input_shape: [32, 32]
+          data_range: [0, 255]
+
+      # C3: 5x5 kernel, stride 2, padding 2 (strided conv with padding) -> 16x16 -> 8x8
+      - type: convolution
+        config:
+          kernel_size: 5
+          stride: 2
+          padding: 2
+          input_shape: [16, 16]
+          input_channels: 1
+          output_channels: 1
+          data_range: [0, 255]
+          weight_range: [-1, 1]
+          activation: none
+          quantize_weights: true
+          quantize_output: true
+
+      # S4: Average Pooling 8x8 -> 4x4
+      - type: pooling
+        config:
+          kernel_size: 2
+          stride: 2
+          pool_type: avg
+          input_shape: [8, 8]
+          data_range: [0, 255]
+
+      # C5: 3x3 kernel, stride 1, padding 0 (no padding) -> 4x4 -> 2x2
+      - type: convolution
+        config:
+          kernel_size: 3
+          stride: 1
+          padding: 0
+          input_shape: [4, 4]
+          input_channels: 1
+          output_channels: 1
+          data_range: [0, 255]
+          weight_range: [-1, 1]
+          activation: none
+          quantize_weights: true
+          quantize_output: true

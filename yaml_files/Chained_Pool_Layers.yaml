@@ -1,0 +1,29 @@
+test_suite:
+  - name: "Chained Pooling Layers"
+    layers:
+      # Layer 1: Max pooling on 28x28 input -> 14x14 output
+      - type: pooling
+        config:
+          kernel_size: 2
+          stride: 2
+          pool_type: max
+          input_shape: [28, 28]
+          data_range: [0, 255]
+      
+      # Layer 2: Avg pooling on 14x14 input -> 7x7 output
+      - type: pooling
+        config:
+          kernel_size: 2
+          stride: 2
+          pool_type: avg
+          input_shape: [14, 14]
+          data_range: [0, 255]
+      
+      # Layer 3: Min pooling on 7x7 input -> 3x3 output
+      - type: pooling
+        config:
+          kernel_size: 2
+          stride: 2
+          pool_type: min
+          input_shape: [7, 7]
+          data_range: [0, 255]
