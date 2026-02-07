@@ -1,0 +1,16 @@
+test_suite:
+  - name: "Multi-Channel Convolution"
+    layers:
+      - type: convolution
+        config:
+          kernel_size: 3
+          stride: 1
+          padding: 1
+          input_shape: [14, 14]
+          input_channels: 3
+          output_channels: 8
+          data_range: [0, 255]
+          weight_range: [-1, 1]
+          activation: none
+          quantize_weights: true
+          quantize_output: true
