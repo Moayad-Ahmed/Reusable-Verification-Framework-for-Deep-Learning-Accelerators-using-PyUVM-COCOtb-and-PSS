@@ -51,4 +51,4 @@ class FullyConnectedStrategy(LayerStrategy):
             output = output + bias.astype(np.int32)
         
         # Truncate to int8 with wrapping (matches 8-bit DUT accumulator)
-        return output.astype(np.int64)
+        return output.astype(np.int8)
