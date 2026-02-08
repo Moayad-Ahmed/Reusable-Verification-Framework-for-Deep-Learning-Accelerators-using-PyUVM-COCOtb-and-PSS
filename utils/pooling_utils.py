@@ -70,7 +70,6 @@ class PoolingBFM(metaclass=utility_classes.Singleton):
         self.dut.conv_img_width.value = 32
         self.dut.conv_in_channels.value = 3
         self.dut.conv_out_channels.value = 16
-        self.dut.conv_activation.value = 0
 
         await RisingEdge(self.dut.clk)
         self.dut.rst_n.value = 1
@@ -133,7 +132,6 @@ class PoolingBFM(metaclass=utility_classes.Singleton):
         self.dut.conv_img_width.value = 32
         self.dut.conv_in_channels.value = 3
         self.dut.conv_out_channels.value = 16
-        self.dut.conv_activation.value = 0
 
         while True:
             await RisingEdge(self.dut.clk)

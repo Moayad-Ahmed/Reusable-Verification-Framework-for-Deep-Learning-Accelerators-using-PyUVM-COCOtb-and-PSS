@@ -11,6 +11,5 @@ test_suite:
           output_channels: 1
           data_range: [0, 255]
           weight_range: [-1, 1]
-          activation: none
           quantize_weights: true
           quantize_output: true

@@ -31,7 +31,6 @@ module CNN_top #(
     input  wire [7:0]  conv_img_width,
     input  wire [7:0]  conv_in_channels,
     input  wire [7:0]  conv_out_channels,
-    input  wire [1:0]  conv_activation,
     output wire        conv_valid_out,
     output wire [MAX_OUT_CHANNELS*MAX_IMG_HEIGHT*MAX_IMG_WIDTH*ELEM_WIDTH-1:0] conv_data_out,
 
@@ -78,7 +77,6 @@ module CNN_top #(
         .img_width      (conv_img_width),
         .in_channels    (conv_in_channels),
         .out_channels   (conv_out_channels),
-        .activation     (conv_activation),
         .valid_out      (conv_valid_out),
         .data_out       (conv_data_out)
     );

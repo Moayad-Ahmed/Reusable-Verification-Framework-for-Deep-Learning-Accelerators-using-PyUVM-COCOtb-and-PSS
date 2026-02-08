@@ -165,11 +165,6 @@ class ConvolutionStrategy(LayerStrategy):
                     elif scaled_value < 0:
                         scaled_value = 0
                     
-                    # Apply activation
-                    activation_type = config.get('activation', 'none')
-                    if activation_type == 'relu' and scaled_value < 0:
-                        scaled_value = 0
-                    
                     # Store result
                     if output_channels > 1:
                         output[oc, oh, ow] = scaled_value

@@ -72,7 +72,6 @@ class ConvolutionBFM(metaclass=utility_classes.Singleton):
         self.dut.conv_img_width.value = 32
         self.dut.conv_in_channels.value = 1
         self.dut.conv_out_channels.value = 1
-        self.dut.conv_activation.value = 0
 
         # Reset Pooling BFM inputs as well
         self.dut.pool_valid_in.value = 0
@@ -177,7 +176,6 @@ class ConvolutionBFM(metaclass=utility_classes.Singleton):
         self.dut.conv_img_width.value = 32
         self.dut.conv_in_channels.value = 1
         self.dut.conv_out_channels.value = 1
-        self.dut.conv_activation.value = 0
 
         # Initialize Pooling BFM inputs as well
         self.dut.pool_valid_in.value = 0
@@ -211,11 +209,6 @@ class ConvolutionBFM(metaclass=utility_classes.Singleton):
                 self.dut.conv_img_width.value = config['input_shape'][1]
                 self.dut.conv_in_channels.value = config.get('input_channels', 1)
                 self.dut.conv_out_channels.value = config.get('output_channels', 1)
-                
-                # Set activation function
-                activation_map = {'none': 0, 'relu': 1, 'sigmoid': 2}
-                activation = config.get('activation', 'none')
-                self.dut.conv_activation.value = activation_map.get(activation, 0)
                 
             except QueueEmpty:
                 # Deassert valid_in when no new transaction

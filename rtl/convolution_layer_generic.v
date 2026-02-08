@@ -36,7 +36,6 @@ module convolution_layer_generic #(
     input wire [7:0] img_width,             // Input image width
     input wire [7:0] in_channels,           // Number of input channels
     input wire [7:0] out_channels,          // Number of output channels
-    input wire [1:0] activation,            // 0: None, 1: ReLU, 2: Sigmoid (simplified)
 
     output reg valid_out,
     output reg [MAX_OUT_DATA_WIDTH-1:0] data_out
@@ -125,30 +124,13 @@ module convolution_layer_generic #(
                                     // This matches the Python dequantization: kernel / 127.0
                                     scaled_sum = conv_sum / WEIGHT_SCALE;
 
-                                    // Apply clamping and activation
+                                    // Apply clamping
                                     if (scaled_sum > 255)
                                         output_val = 8'd255;
                                     else if (scaled_sum < 0)
                                         output_val = 8'd0;
                                     else
                                         output_val = scaled_sum[ELEM_WIDTH-1:0];
-
-                                    // Apply activation function
-                                    case (activation)
-                                        2'b00: begin  // No activation - already clamped above
-                                            // output_val already set
-                                        end
-                                        2'b01: begin  // ReLU - ensure positive
-                                            if (scaled_sum < 0)
-                                                output_val = 8'b0;
-                                        end
-                                        2'b10: begin  // Simplified sigmoid (already clamped to 0-255)
-                                            // output_val already set
-                                        end
-                                        default: begin
-                                            // output_val already set
-                                        end
-                                    endcase
 
                                     // Store result
                                     out_idx = out_ch * out_height * out_width +
