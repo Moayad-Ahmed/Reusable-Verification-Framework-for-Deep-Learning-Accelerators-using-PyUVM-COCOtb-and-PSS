@@ -93,6 +93,10 @@ class ChainedLayerSequence(uvm_sequence):
                     # First layer: generate input, others: use previous output
                     if layer_idx == 0:
                         seq_item.input_data = strategy.generate_input_data(seq_item.config)
+                    elif layer_idx != 0 and seq_item.layer_type == 'fully_connected':
+                        # For fully connected layers, we need to flatten the previous output
+                        # Cast to int8 so the golden model uses signed interpretation matching the HW
+                        seq_item.input_data = previous_output.flatten().astype(np.int8)
                     else:
                         seq_item.input_data = previous_output
                         #uvm_root().logger.info(f"Layer {layer_idx} using previous layer's output as input")

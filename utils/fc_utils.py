@@ -114,7 +114,13 @@ class FullyConnectedBFM(metaclass=utility_classes.Singleton):
                 
                 self.dut.fc_in_vec.value = self.flatten_matrix_to_int(data_in)
                 self.dut.fc_bias.value = self.flatten_matrix_to_int(bias)
-                self.dut.fc_weights.value = self.flatten_matrix_to_int(weights)
+
+                # Pad weight rows to hardware INPUT_SIZE so that byte layout
+                # matches the Verilog unpacking stride (g_i*INPUT_SIZE + g_j).
+                max_input_size = len(self.dut.fc_in_vec) // 8
+                padded_weights = np.zeros((config['output_size'], max_input_size), dtype=weights.dtype)
+                padded_weights[:, :config['input_size']] = weights
+                self.dut.fc_weights.value = self.flatten_matrix_to_int(padded_weights)
             except QueueEmpty:
                 # Deassert valid_in when no new transaction
                 self.dut.fc_en.value = 0
