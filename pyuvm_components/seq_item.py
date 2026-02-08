@@ -8,6 +8,8 @@ class GenericLayerTransaction(uvm_sequence_item):
         self.input_data = None
         self.kernel_weights = None
         self.expected_output = None
+        self.fc_weights = None
+        self.fc_bias = None
         self.actual_output = None
         self.layer_type = layer_strategy.get_layer_type()
 
