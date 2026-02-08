@@ -40,6 +40,42 @@ class FullyConnectedBFM(metaclass=utility_classes.Singleton):
         """Wait for the monitor to capture the actual DUT output and return it"""
         result = await self.result_ready_queue.get()
         return result
+    
+    def flatten_matrix_to_int(self, matrix):
+        """Convert a 2D matrix to a packed integer for the DUT.
+        Each element is 8 bits, packed in row-major order (E1, E2, ..., E9)."""
+        # Flatten the matrix in row-major order
+        if isinstance(matrix, np.ndarray):
+            flat = matrix.flatten().tolist()
+        else:
+            flat = [elem for row in matrix for elem in row]
+        
+        # Pack elements into a single integer (E1 at LSB, E9 at MSB)
+        packed_value = 0
+        for i, elem in enumerate(flat):
+            packed_value |= (int(elem) & 0xFF) << (i * 8)
+        return packed_value
+    
+    def int_to_output_matrix(self, packed_value, shape):
+        """Convert a packed integer from the DUT back to a 2D matrix.
+        Each element is 8 bits, packed in row-major order."""
+        # Convert to integer if it's a cocotb BinaryValue/LogicArray
+        if hasattr(packed_value, 'to_unsigned'):
+            packed_value = packed_value.to_unsigned()
+        else:
+            packed_value = int(packed_value)
+        
+        # Extract elements from packed integer (interpret as signed int8)
+        num_elements = shape[0] * shape[1]
+        flat = []
+        for i in range(num_elements):
+            elem = (packed_value >> (i * 8)) & 0xFF
+            if elem > 127:
+                elem -= 256
+            flat.append(elem)
+        
+        # Reshape to 2D array
+        return np.array(flat, dtype=np.int8).reshape(shape)
 
     async def reset(self):
         await RisingEdge(self.dut.clk)
@@ -69,9 +105,9 @@ class FullyConnectedBFM(metaclass=utility_classes.Singleton):
                 (en, data_in, weights, bias, config) = self.drv_queue.get_nowait()
                 self.dut.en.value = en
                 
-                self.dut.in_vec.value = data_in
-                self.dut.bias.value = bias
-                self.dut.weights.value = weights
+                self.dut.in_vec.value = self.flatten_matrix_to_int(data_in)
+                self.dut.bias.value = self.flatten_matrix_to_int(bias)
+                self.dut.weights.value = self.flatten_matrix_to_int(weights)
                 
                 
             except QueueEmpty:
@@ -82,7 +118,7 @@ class FullyConnectedBFM(metaclass=utility_classes.Singleton):
         while True:
             await RisingEdge(self.dut.clk)
             if self.dut.valid.value == 1:
-                result = (self.dut.out_vec.value)
+                result = self.int_to_output_matrix(self.dut.out_vec.value, (1,10)).flatten()
                 await self.mtr_queue.put(result)
 
             

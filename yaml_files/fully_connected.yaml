@@ -1,0 +1,11 @@
+test_suite:
+  - name: "Fully Connected Layer"
+    layers:
+      # Layer 1: Simple fully connected layer
+      - type: fully_connected
+        config:
+          input_size: 128
+          output_size: 10
+          use_bias: true
+          data_range: [-128, 127]
+          weight_range: [-128, 127]

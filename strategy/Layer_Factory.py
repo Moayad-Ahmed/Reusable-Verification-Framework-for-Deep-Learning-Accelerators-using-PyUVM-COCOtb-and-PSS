@@ -1,10 +1,12 @@
 from convolution_strategy import ConvolutionStrategy
 from pooling_strategy import PoolingStrategy
+from fullyconnected_strategy import FullyConnectedStrategy
 
 class LayerFactory:
     _strategies = {
         'pooling': PoolingStrategy,
-        'convolution': ConvolutionStrategy
+        'convolution': ConvolutionStrategy,
+        'fully_connected': FullyConnectedStrategy
         # Add more as you implement them
     }
     

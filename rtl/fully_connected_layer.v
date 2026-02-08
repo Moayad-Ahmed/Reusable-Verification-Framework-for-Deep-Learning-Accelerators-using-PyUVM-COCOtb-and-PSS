@@ -16,7 +16,7 @@ module fully_connected_int8 #(
 );
 
     integer i, j;
-    reg signed [31:0] accumulator; // 32-bit for intermediate sums
+    reg signed [7:0] accumulator; // 8-bit wrapping accumulator
     
     // Internal signed representations
     wire signed [7:0] signed_in    [0:INPUT_SIZE-1];
@@ -52,13 +52,8 @@ module fully_connected_int8 #(
                     accumulator = accumulator + (signed_in[j] * signed_w[i][j]);
                 end
                 
-                // --- INT8 Saturation Logic ---
-                if (accumulator > 127)
-                    out_vec[i*8 +: 8] <= 8'd127;
-                else if (accumulator < -128)
-                    out_vec[i*8 +: 8] <= 8'd-128;
-                else
-                    out_vec[i*8 +: 8] <= accumulator[7:0];
+                // Direct 8-bit wrapping output (no saturation)
+                out_vec[i*8 +: 8] <= accumulator;
             end
             valid <= 1;
         end else begin

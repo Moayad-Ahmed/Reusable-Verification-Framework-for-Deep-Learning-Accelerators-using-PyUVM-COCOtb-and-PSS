@@ -9,25 +9,13 @@ class FullyConnectedStrategy(LayerStrategy):
     
     def get_layer_type(self):
         return "fully_connected"
-    
-    def generate_config(self):
-        input_sizes = [128, 256, 512, 784, 1024]
-        output_sizes = [10, 64, 128, 256, 512]
-        
-        return {
-            'input_size': np.random.choice(input_sizes),
-            'output_size': np.random.choice(output_sizes),
-            'use_bias': True,
-            'data_range': (-128, 127),
-            'weight_range': (-128, 127)
-        }
 
     def generate_input_weights(self, config):
         """Generates the weight matrix [output_size, input_size]"""
         weight_low, weight_high = config['weight_range']
         shape = (config['output_size'], config['input_size'])
         weights = np.random.randint(weight_low, weight_high + 1, size=shape)
-        return weights.astype(np.int32)
+        return weights.astype(np.int8)
 
     def generate_input_biases(self, config):
         """Generates the bias vector [output_size]"""
@@ -35,16 +23,16 @@ class FullyConnectedStrategy(LayerStrategy):
             data_low, data_high = config['data_range']
             shape = (config['output_size'],)
             bias = np.random.randint(data_low, data_high + 1, size=shape)
-            return bias.astype(np.int32)
+            return bias.astype(np.int8)
         else:
-            return np.zeros(config['output_size'], dtype=np.int32)
+            return np.zeros(config['output_size'], dtype=np.int8)
 
     def generate_input_data(self, config):
         """Generates only the input feature vector [input_size]"""
         data_low, data_high = config['data_range']
         shape = (config['input_size'],)
         input_data = np.random.randint(data_low, data_high + 1, size=shape)
-        return input_data.astype(np.int32)
+        return input_data.astype(np.int8)
     
     def compute_golden(self, input_data, weights, bias, config):
         """
@@ -56,13 +44,11 @@ class FullyConnectedStrategy(LayerStrategy):
             bias: 1D array of biases
             config: Layer configuration dictionary
         """
-        # Ensure input is 1D for matmul
-        # Computation: output = weights @ input_data
-        output = np.matmul(weights, input_data)
+        # Compute full-precision dot product, then truncate to int8 (wrapping, no saturation)
+        output = np.matmul(weights.astype(np.int32), input_data.astype(np.int32))
         
         if config['use_bias']:
-            output = output + bias
+            output = output + bias.astype(np.int32)
         
-        # Change from 32-bit clip to 8-bit clip to match your RTL
-        output = np.clip(output, -128, 127)
+        # Truncate to int8 with wrapping (matches 8-bit DUT accumulator)
         return output.astype(np.int8)
