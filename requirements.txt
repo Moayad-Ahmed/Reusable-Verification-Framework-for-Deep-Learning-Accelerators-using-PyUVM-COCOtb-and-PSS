@@ -1,0 +1,5 @@
+cocotb
+pyuvm
+numpy
+pyyaml
+torch
