@@ -3,4 +3,5 @@
 transcript
 pyuvm_components/__pycache__/
 strategy/__pycache__/
+utils/__pycache__/
 sim_build/
