@@ -36,7 +36,6 @@ cleanall:
 	@rm -rf sim_build
 	@rm -rf modelsim.ini
 	@rm -rf transcript
-	@rm -rf *.txt
 	@rm -rf *.ucdb
 	@rm -rf *.xml
 	@rm -rf *.yml
