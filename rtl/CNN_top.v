@@ -12,7 +12,10 @@ module CNN_top #(
     parameter MAX_IN_CHANNELS  = 3,
     parameter MAX_OUT_CHANNELS = 16,
     parameter MAX_KERNEL_SIZE  = 5,
-    parameter MAX_WEIGHT_WIDTH = 8
+    parameter MAX_WEIGHT_WIDTH = 8,
+    // Fully Connected-specific parameters
+    parameter INPUT_SIZE       = 128,
+    parameter OUTPUT_SIZE      = 10
 ) (
     input wire clk,
     input wire rst_n,
@@ -42,7 +45,15 @@ module CNN_top #(
     input  wire [7:0]  pool_img_height,
     input  wire [7:0]  pool_img_width,
     output wire        pool_valid_out,
-    output wire [MAX_IMG_HEIGHT*MAX_IMG_WIDTH*ELEM_WIDTH-1:0] pool_data_out
+    output wire [MAX_IMG_HEIGHT*MAX_IMG_WIDTH*ELEM_WIDTH-1:0] pool_data_out,
+
+    // ───────────────── Fully Connected interface ─────────────────
+    input  wire                   en,
+    input  wire [INPUT_SIZE*8-1:0]  in_vec,
+    input  wire [OUTPUT_SIZE*INPUT_SIZE*8-1:0] weights,
+    input  wire [OUTPUT_SIZE*8-1:0] bias,
+    output wire [OUTPUT_SIZE*8-1:0] out_vec,
+    output wire                    valid
 );
 
     // ───────────────── Convolution instance ─────────────────
@@ -91,6 +102,21 @@ module CNN_top #(
         .img_width (pool_img_width),
         .valid_out (pool_valid_out),
         .data_out  (pool_data_out)
+    );
+
+    // ───────────────── Fully Connected instance ─────────────────
+    fully_connected_int8 #(
+        .INPUT_SIZE  (INPUT_SIZE),
+        .OUTPUT_SIZE (OUTPUT_SIZE)
+    ) fc_inst (
+        .clk     (clk),
+        .rst_n   (rst_n),
+        .en      (en),
+        .in_vec  (in_vec),
+        .weights  (weights),
+        .bias     (bias),
+        .out_vec  (out_vec),
+        .valid    (valid)
     );
 
 endmodule
