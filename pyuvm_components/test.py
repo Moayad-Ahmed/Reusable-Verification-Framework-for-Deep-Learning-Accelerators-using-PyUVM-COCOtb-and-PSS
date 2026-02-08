@@ -44,7 +44,7 @@ class Successive_Min_Avg_Pool(Pool_Basic_Test):
 
 
 @pyuvm.test()
-class My_Chained_Layers_Test(Pool_Basic_Test):
+class Chained_Pool_Layers_Test(Pool_Basic_Test):
     async def run_phase(self):
         cocotb.start_soon(Clock(cocotb.top.clk, 2, "ns").start())
         chained_layer_seq = ChainedLayerSequence("chained_layer_seq", "yaml_files/Chained_Pool_Layers.yaml")
@@ -123,5 +123,23 @@ class FullyConnected_Test(uvm_test):
 
         self.raise_objection()
         await fully_connected_seq.start(self.sqr)
+        await ClockCycles(cocotb.top.clk, 10)
+        self.drop_objection()
+
+@pyuvm.test()
+class Conv_Pool_FC_Test(uvm_test):
+    """Test a 3-layer network: convolution followed by pooling followed by fully connected layer"""
+    def build_phase(self):
+        self.My_Env = My_Env("My_Env", self)
+
+    def end_of_elaboration_phase(self):
+        self.sqr = ConfigDB().get(None, "", "SEQR")
+        
+    async def run_phase(self):
+        cocotb.start_soon(Clock(cocotb.top.clk, 2, "ns").start())
+        conv_pool_fc_seq = ChainedLayerSequence("conv_pool_fc_seq", "yaml_files/conv_pool_fc.yaml")
+
+        self.raise_objection()
+        await conv_pool_fc_seq.start(self.sqr)
         await ClockCycles(cocotb.top.clk, 10)
         self.drop_objection()
