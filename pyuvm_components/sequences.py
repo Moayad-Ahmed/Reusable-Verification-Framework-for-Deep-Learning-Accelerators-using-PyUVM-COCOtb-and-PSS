@@ -44,6 +44,18 @@ class ConfigDrivenSequence(uvm_sequence):
                             seq_item.config, 
                             seq_item.kernel_weights
                         )
+                    elif seq_item.layer_type == 'fully_connected':
+                        # Generate weights and biases for fully connected layer
+                        seq_item.fc_weights = strategy.generate_input_weights(seq_item.config)
+                        seq_item.fc_bias = strategy.generate_input_biases(seq_item.config)
+
+                        # Compute expected output using the SAME weights and biases
+                        seq_item.expected_output = strategy.compute_golden(
+                            seq_item.input_data, 
+                            seq_item.fc_weights, 
+                            seq_item.fc_bias, 
+                            seq_item.config
+                        )
                     else:
                         seq_item.expected_output = strategy.compute_golden(
                              seq_item.input_data, seq_item.config)
@@ -96,6 +108,18 @@ class ChainedLayerSequence(uvm_sequence):
                             seq_item.input_data, 
                             seq_item.config, 
                             seq_item.kernel_weights
+                        )
+                    elif seq_item.layer_type == 'fully_connected':
+                        # Generate weights and biases for fully connected layer
+                        seq_item.fc_weights = strategy.generate_input_weights(seq_item.config)
+                        seq_item.fc_bias = strategy.generate_input_biases(seq_item.config)
+
+                        # Compute expected output using the SAME weights and biases
+                        seq_item.expected_output = strategy.compute_golden(
+                            seq_item.input_data, 
+                            seq_item.fc_weights, 
+                            seq_item.fc_bias, 
+                            seq_item.config
                         )
                     else:
                         seq_item.expected_output = strategy.compute_golden(
