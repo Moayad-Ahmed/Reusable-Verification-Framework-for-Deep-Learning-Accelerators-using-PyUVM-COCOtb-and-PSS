@@ -63,8 +63,6 @@ class FullyConnectedStrategy(LayerStrategy):
         if config['use_bias']:
             output = output + bias
         
-        # Standard 32-bit hardware accumulator saturation check
-        # (Matches a typical signed 32-bit register in Verilog)
-        output = np.clip(output, -(2**31), 2**31 - 1)
-        
-        return output.astype(np.int32)
+        # Change from 32-bit clip to 8-bit clip to match your RTL
+        output = np.clip(output, -128, 127)
+        return output.astype(np.int8)
