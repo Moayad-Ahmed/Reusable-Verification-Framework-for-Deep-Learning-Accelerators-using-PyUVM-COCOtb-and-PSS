@@ -12,6 +12,7 @@ export PYTHONPATH := $(PWD)/pyuvm_components;$(PWD)/strategy;$(PWD)/utils;$(PYTH
 # Adding Verilog sources
 VERILOG_SOURCES += $(PWD)/rtl/pooling_layer_generic.v
 VERILOG_SOURCES += $(PWD)/rtl/convolution_layer_generic.v
+VERILOG_SOURCES += $(PWD)/rtl/fully_connected_layer.v
 VERILOG_SOURCES += $(PWD)/rtl/CNN_top.v
 
 # TOPLEVEL is the name of the toplevel module in your Verilog file
