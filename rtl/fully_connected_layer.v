@@ -1,23 +1,27 @@
-module fully_connected_int8 #(
+// verilog_lint: waive-start explicit-parameter-storage-type
+// verilog_lint: waive-start unpacked-dimensions-range-ordering
+// verilog_lint: waive-start generate-label
+
+module fully_connected_layer #(
     parameter INPUT_SIZE  = 128,
     parameter OUTPUT_SIZE = 10
 )(
     input  wire                   clk,
     input  wire                   rst_n,
     input  wire                   en,
-    
+
     // Flattened input data interfaces
     input  wire [INPUT_SIZE*8-1:0]  in_vec,
     input  wire [OUTPUT_SIZE*INPUT_SIZE*8-1:0] weights,
     input  wire [OUTPUT_SIZE*8-1:0] bias,
-    
+
     output reg  [OUTPUT_SIZE*8-1:0] out_vec,
     output reg                    valid
 );
 
     integer i, j;
     reg signed [7:0] accumulator; // 8-bit wrapping accumulator
-    
+
     // Internal signed representations
     wire signed [7:0] signed_in    [0:INPUT_SIZE-1];
     wire signed [7:0] signed_w     [0:OUTPUT_SIZE-1][0:INPUT_SIZE-1];
@@ -46,12 +50,12 @@ module fully_connected_int8 #(
             for (i = 0; i < OUTPUT_SIZE; i = i + 1) begin
                 // Start with the bias (sign-extended to 32-bit)
                 accumulator = $signed(signed_bias[i]);
-                
+
                 // Dot product
                 for (j = 0; j < INPUT_SIZE; j = j + 1) begin
                     accumulator = accumulator + (signed_in[j] * signed_w[i][j]);
                 end
-                
+
                 // Direct 8-bit wrapping output (no saturation)
                 out_vec[i*8 +: 8] <= accumulator;
             end

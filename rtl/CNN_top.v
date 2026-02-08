@@ -103,7 +103,7 @@ module CNN_top #(
     );
 
     // ───────────────── Fully Connected instance ─────────────────
-    fully_connected_int8 #(
+    fully_connected_layer #(
         .INPUT_SIZE  (INPUT_SIZE),
         .OUTPUT_SIZE (OUTPUT_SIZE)
     ) fc_inst (
