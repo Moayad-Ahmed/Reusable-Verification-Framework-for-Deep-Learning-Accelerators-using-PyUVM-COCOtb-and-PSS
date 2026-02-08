@@ -81,10 +81,12 @@ class FullyConnectedBFM(metaclass=utility_classes.Singleton):
         await RisingEdge(self.dut.clk)
         # Initialize configurable inputs during reset
         self.dut.rst_n.value = 1
-        self.dut.en.value = 0
-        self.dut.in_vec.value = 0
-        self.dut.weights.value = 0  
-        self.dut.bias.value = 0
+        self.dut.fc_en.value = 0
+        self.dut.fc_in_vec.value = 0
+        self.dut.fc_weights.value = 0  
+        self.dut.fc_bias.value = 0
+        self.dut.fc_actual_input_size.value = 0
+        self.dut.fc_actual_output_size.value = 0
         
         await RisingEdge(self.dut.clk)
         self.dut.rst_n.value = 1
@@ -94,31 +96,35 @@ class FullyConnectedBFM(metaclass=utility_classes.Singleton):
     async def driver_bfm(self):
         # Initialize with default values
         self.dut.rst_n.value = 1
-        self.dut.en.value = 0
-        self.dut.in_vec.value = 0
-        self.dut.weights.value = 0  
-        self.dut.bias.value = 0
+        self.dut.fc_en.value = 0
+        self.dut.fc_in_vec.value = 0
+        self.dut.fc_weights.value = 0  
+        self.dut.fc_bias.value = 0
+        self.dut.fc_actual_input_size.value = 0
+        self.dut.fc_actual_output_size.value = 0
         
         while True:
             await RisingEdge(self.dut.clk)
             try:
                 (en, data_in, weights, bias, config) = self.drv_queue.get_nowait()
-                self.dut.en.value = en
+                self.dut.fc_en.value = en
                 
-                self.dut.in_vec.value = self.flatten_matrix_to_int(data_in)
-                self.dut.bias.value = self.flatten_matrix_to_int(bias)
-                self.dut.weights.value = self.flatten_matrix_to_int(weights)
+                self.dut.fc_actual_input_size.value = int(config['input_size'])
+                self.dut.fc_actual_output_size.value = int(config['output_size'])
                 
-                
+                self.dut.fc_in_vec.value = self.flatten_matrix_to_int(data_in)
+                self.dut.fc_bias.value = self.flatten_matrix_to_int(bias)
+                self.dut.fc_weights.value = self.flatten_matrix_to_int(weights)
             except QueueEmpty:
                 # Deassert valid_in when no new transaction
-                self.dut.en.value = 0
+                self.dut.fc_en.value = 0
     
     async def monitor_bfm(self):
         while True:
             await RisingEdge(self.dut.clk)
-            if self.dut.valid.value == 1:
-                result = self.int_to_output_matrix(self.dut.out_vec.value, (1,10)).flatten()
+            if self.dut.fc_valid.value == 1:
+                output_size = int(self.dut.fc_actual_output_size.value)
+                result = self.int_to_output_matrix(self.dut.fc_out_vec.value, (1, output_size)).flatten()
                 await self.mtr_queue.put(result)
 
             

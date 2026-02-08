@@ -47,12 +47,14 @@ module CNN_top #(
     output wire [MAX_IMG_HEIGHT*MAX_IMG_WIDTH*ELEM_WIDTH-1:0] pool_data_out,
 
     // ───────────────── Fully Connected interface ─────────────────
-    input  wire                   en,
-    input  wire [INPUT_SIZE*8-1:0]  in_vec,
-    input  wire [OUTPUT_SIZE*INPUT_SIZE*8-1:0] weights,
-    input  wire [OUTPUT_SIZE*8-1:0] bias,
-    output wire [OUTPUT_SIZE*8-1:0] out_vec,
-    output wire                    valid
+    input  wire                   fc_en,
+    input  wire [31:0]            fc_actual_input_size,
+    input  wire [31:0]            fc_actual_output_size,
+    input  wire [INPUT_SIZE*8-1:0]  fc_in_vec,
+    input  wire [OUTPUT_SIZE*INPUT_SIZE*8-1:0] fc_weights,
+    input  wire [OUTPUT_SIZE*8-1:0] fc_bias,
+    output wire [OUTPUT_SIZE*8-1:0] fc_out_vec,
+    output wire                    fc_valid
 );
 
     // ───────────────── Convolution instance ─────────────────
@@ -107,14 +109,16 @@ module CNN_top #(
         .INPUT_SIZE  (INPUT_SIZE),
         .OUTPUT_SIZE (OUTPUT_SIZE)
     ) fc_inst (
-        .clk     (clk),
-        .rst_n   (rst_n),
-        .en      (en),
-        .in_vec  (in_vec),
-        .weights  (weights),
-        .bias     (bias),
-        .out_vec  (out_vec),
-        .valid    (valid)
+        .clk               (clk),
+        .rst_n             (rst_n),
+        .en                (fc_en),
+        .actual_input_size (fc_actual_input_size),
+        .actual_output_size(fc_actual_output_size),
+        .in_vec            (fc_in_vec),
+        .weights           (fc_weights),
+        .bias              (fc_bias),
+        .out_vec           (fc_out_vec),
+        .valid             (fc_valid)
     );
 
 endmodule

@@ -3,14 +3,18 @@
 // verilog_lint: waive-start generate-label
 
 module fully_connected_layer #(
-    parameter INPUT_SIZE  = 128,
-    parameter OUTPUT_SIZE = 10
+    parameter INPUT_SIZE  = 128,  // Maximum input size
+    parameter OUTPUT_SIZE = 10    // Maximum output size
 )(
     input  wire                   clk,
     input  wire                   rst_n,
     input  wire                   en,
 
-    // Flattened input data interfaces
+    // Runtime actual sizes (must be <= the corresponding parameter)
+    input  wire [31:0]            actual_input_size,
+    input  wire [31:0]            actual_output_size,
+
+    // Flattened input data interfaces (sized to maximum)
     input  wire [INPUT_SIZE*8-1:0]  in_vec,
     input  wire [OUTPUT_SIZE*INPUT_SIZE*8-1:0] weights,
     input  wire [OUTPUT_SIZE*8-1:0] bias,
@@ -22,12 +26,12 @@ module fully_connected_layer #(
     integer i, j;
     reg signed [7:0] accumulator; // 8-bit wrapping accumulator
 
-    // Internal signed representations
+    // Internal signed representations (allocated to maximum size)
     wire signed [7:0] signed_in    [0:INPUT_SIZE-1];
     wire signed [7:0] signed_w     [0:OUTPUT_SIZE-1][0:INPUT_SIZE-1];
     wire signed [7:0] signed_bias  [0:OUTPUT_SIZE-1];
 
-    // Unpack flattened arrays
+    // Unpack flattened arrays (up to maximum size)
     genvar g_i, g_j;
     generate
         for (g_i = 0; g_i < INPUT_SIZE; g_i = g_i + 1) begin
@@ -41,23 +45,30 @@ module fully_connected_layer #(
         end
     endgenerate
 
-    // Computation Logic
+    // Computation Logic — loops use actual sizes, not maximum parameters
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             out_vec <= 0;
             valid   <= 0;
         end else if (en) begin
+            // Zero the entire output first
+            out_vec <= 0;
+
             for (i = 0; i < OUTPUT_SIZE; i = i + 1) begin
-                // Start with the bias (sign-extended to 32-bit)
-                accumulator = $signed(signed_bias[i]);
+                if (i < actual_output_size) begin
+                    // Start with the bias
+                    accumulator = $signed(signed_bias[i]);
 
-                // Dot product
-                for (j = 0; j < INPUT_SIZE; j = j + 1) begin
-                    accumulator = accumulator + (signed_in[j] * signed_w[i][j]);
+                    // Dot product over actual input size
+                    for (j = 0; j < INPUT_SIZE; j = j + 1) begin
+                        if (j < actual_input_size) begin
+                            accumulator = accumulator + (signed_in[j] * signed_w[i][j]);
+                        end
+                    end
+
+                    // Direct 8-bit wrapping output
+                    out_vec[i*8 +: 8] <= accumulator;
                 end
-
-                // Direct 8-bit wrapping output (no saturation)
-                out_vec[i*8 +: 8] <= accumulator;
             end
             valid <= 1;
         end else begin
