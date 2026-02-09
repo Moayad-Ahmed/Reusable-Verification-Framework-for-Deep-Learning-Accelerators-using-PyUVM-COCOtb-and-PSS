@@ -34,6 +34,7 @@ report_code_coverage:
 cleanall:
 	@rm -rf __pycache__
 	@rm -rf sim_build
+	@rm -rf .pytest_cache
 	@rm -rf modelsim.ini
 	@rm -rf transcript
 	@rm -rf *.ucdb
