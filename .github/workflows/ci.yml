@@ -27,7 +27,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
       - name: Clean
-        run: make cleanall
+        run: make SIM=icarus cleanall
 
       - name: Build + Run cocotb tests
         run: |
