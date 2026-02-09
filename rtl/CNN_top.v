@@ -15,7 +15,10 @@ module CNN_top #(
     parameter MAX_WEIGHT_WIDTH = 8,
     // Fully Connected-specific parameters
     parameter INPUT_SIZE       = 128,
-    parameter OUTPUT_SIZE      = 10
+    parameter OUTPUT_SIZE      = 10,
+    // Activation-specific parameters
+    parameter ACT_DATA_WIDTH   = 8,
+    parameter ACT_MATRIX_SIZE  = 16
 ) (
     input wire clk,
     input wire rst_n,
@@ -54,7 +57,15 @@ module CNN_top #(
     input  wire [OUTPUT_SIZE*INPUT_SIZE*8-1:0] fc_weights,
     input  wire [OUTPUT_SIZE*8-1:0] fc_bias,
     output wire [OUTPUT_SIZE*8-1:0] fc_out_vec,
-    output wire                    fc_valid
+    output wire                    fc_valid,
+
+    // ───────────────── Activation interface ─────────────────
+    input  wire [1:0]  func_sel,
+    input  wire [31:0] act_matrix_size,  // Actual number of elements (<= ACT_MATRIX_SIZE)
+    input  wire signed [ACT_DATA_WIDTH-1:0] data_in [0:ACT_MATRIX_SIZE-1],
+    input  wire        valid_in,
+    output wire signed [ACT_DATA_WIDTH-1:0] data_out [0:ACT_MATRIX_SIZE-1],
+    output wire        valid_out
 );
 
     // ───────────────── Convolution instance ─────────────────
@@ -119,6 +130,21 @@ module CNN_top #(
         .bias              (fc_bias),
         .out_vec           (fc_out_vec),
         .valid             (fc_valid)
+    );
+
+    // ───────────────── Activation instance ─────────────────
+    activation_functions #(
+        .DATA_WIDTH   (ACT_DATA_WIDTH),
+        .MATRIX_SIZE  (ACT_MATRIX_SIZE)
+    ) act_inst (
+        .clk         (clk),
+        .rst_n       (rst_n),
+        .func_sel    (func_sel),
+        .matrix_size (act_matrix_size),
+        .data_in     (data_in),
+        .valid_in    (valid_in),
+        .data_out    (data_out),
+        .valid_out   (valid_out)
     );
 
 endmodule

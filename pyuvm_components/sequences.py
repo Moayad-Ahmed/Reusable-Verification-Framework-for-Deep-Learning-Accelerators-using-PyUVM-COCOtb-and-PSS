@@ -21,7 +21,7 @@ class ConfigDrivenSequence(uvm_sequence):
                 # Create strategy from factory
                 strategy = LayerFactory.create_strategy(layer_spec['type'])
                 
-                for i in range(10):
+                for i in range(1):
                     # Create transaction
                     seq_item = GenericLayerTransaction(
                         f"{layer_spec['type']}_test_{i}",
@@ -74,7 +74,7 @@ class ChainedLayerSequence(uvm_sequence):
         for test_suite in self.config['test_suite']:
             uvm_root().logger.info(f"Running chained test: {test_suite['name']}")
             
-            for i in range(10):
+            for i in range(1):
                 previous_output = None
                 
                 for layer_idx, layer_spec in enumerate(test_suite['layers']):

@@ -150,3 +150,79 @@ class Conv_Pool_FC_Test(uvm_test):
         await conv_pool_fc_seq.start(self.sqr)
         await ClockCycles(cocotb.top.clk, 10)
         self.drop_objection()
+
+
+@pyuvm.test()
+class Activation_ReLU_Test(uvm_test):
+    """Test ReLU activation function on a 4x4 matrix"""
+    def build_phase(self):
+        self.My_Env = My_Env("My_Env", self)
+
+    def end_of_elaboration_phase(self):
+        self.sqr = ConfigDB().get(None, "", "SEQR")
+
+    async def run_phase(self):
+        cocotb.start_soon(Clock(cocotb.top.clk, 2, "ns").start())
+        relu_seq = ConfigDrivenSequence("relu_seq", yaml_file_path("one_layer_activation_relu.yaml"))
+
+        self.raise_objection()
+        await relu_seq.start(self.sqr)
+        await ClockCycles(cocotb.top.clk, 10)
+        self.drop_objection()
+
+
+@pyuvm.test()
+class Activation_Sigmoid_Test(uvm_test):
+    """Test Sigmoid activation function on a 4x4 matrix"""
+    def build_phase(self):
+        self.My_Env = My_Env("My_Env", self)
+
+    def end_of_elaboration_phase(self):
+        self.sqr = ConfigDB().get(None, "", "SEQR")
+
+    async def run_phase(self):
+        cocotb.start_soon(Clock(cocotb.top.clk, 2, "ns").start())
+        sigmoid_seq = ConfigDrivenSequence("sigmoid_seq", yaml_file_path("one_layer_activation_sigmoid.yaml"))
+
+        self.raise_objection()
+        await sigmoid_seq.start(self.sqr)
+        await ClockCycles(cocotb.top.clk, 10)
+        self.drop_objection()
+
+
+@pyuvm.test()
+class Activation_Tanh_Test(uvm_test):
+    """Test Tanh activation function on a 4x4 matrix"""
+    def build_phase(self):
+        self.My_Env = My_Env("My_Env", self)
+
+    def end_of_elaboration_phase(self):
+        self.sqr = ConfigDB().get(None, "", "SEQR")
+
+    async def run_phase(self):
+        cocotb.start_soon(Clock(cocotb.top.clk, 2, "ns").start())
+        tanh_seq = ConfigDrivenSequence("tanh_seq", yaml_file_path("one_layer_activation_tanh.yaml"))
+
+        self.raise_objection()
+        await tanh_seq.start(self.sqr)
+        await ClockCycles(cocotb.top.clk, 10)
+        self.drop_objection()
+
+
+@pyuvm.test()
+class Activation_Softmax_Test(uvm_test):
+    """Test Softmax activation function on a 4x4 matrix"""
+    def build_phase(self):
+        self.My_Env = My_Env("My_Env", self)
+
+    def end_of_elaboration_phase(self):
+        self.sqr = ConfigDB().get(None, "", "SEQR")
+
+    async def run_phase(self):
+        cocotb.start_soon(Clock(cocotb.top.clk, 2, "ns").start())
+        softmax_seq = ConfigDrivenSequence("softmax_seq", yaml_file_path("one_layer_activation_softmax.yaml"))
+
+        self.raise_objection()
+        await softmax_seq.start(self.sqr)
+        await ClockCycles(cocotb.top.clk, 10)
+        self.drop_objection()

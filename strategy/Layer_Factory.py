@@ -1,13 +1,14 @@
 from strategy.convolution_strategy import ConvolutionStrategy
 from strategy.pooling_strategy import PoolingStrategy
 from strategy.fullyconnected_strategy import FullyConnectedStrategy
+from strategy.activation_strategy import ActivationStrategy
 
 class LayerFactory:
     _strategies = {
         'pooling': PoolingStrategy,
         'convolution': ConvolutionStrategy,
-        'fully_connected': FullyConnectedStrategy
-        # Add more as you implement them
+        'fully_connected': FullyConnectedStrategy,
+        'activation': ActivationStrategy
     }
     
     @classmethod

@@ -1,0 +1,9 @@
+test_suite:
+  - name: "Single ReLU Activation Test"
+    description: "Test ReLU activation function on 4x4 matrix with 8-bit signed integers"
+    layers:
+      - type: "activation"
+        config:
+          activation_type: "relu"
+          input_shape: [3, 3]
+          data_range: [-128, 127]

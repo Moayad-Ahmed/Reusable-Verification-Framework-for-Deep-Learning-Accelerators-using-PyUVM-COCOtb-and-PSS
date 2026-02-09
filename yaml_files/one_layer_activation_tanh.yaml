@@ -1,0 +1,9 @@
+test_suite:
+  - name: "Single Tanh Activation Test"
+    description: "Test Tanh activation function on 4x4 matrix with 8-bit signed integers"
+    layers:
+      - type: "activation"
+        config:
+          activation_type: "tanh"
+          input_shape: [4, 4]
+          data_range: [-128, 127]

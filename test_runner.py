@@ -52,6 +52,7 @@ def test_cnn_runner():
         rtl_dir / "convolution_layer_generic.v",
         rtl_dir / "pooling_layer_generic.v",
         rtl_dir / "fully_connected_layer.v",
+        rtl_dir / "Activation_layer_DUT.v",
         rtl_dir / "CNN_top.v",
     ]
 
