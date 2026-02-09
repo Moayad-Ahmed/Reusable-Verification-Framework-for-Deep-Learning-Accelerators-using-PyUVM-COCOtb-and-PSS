@@ -7,7 +7,7 @@
 
 module activation_functions #(
     parameter DATA_WIDTH = 8,       // 8-bit signed integers
-    parameter MATRIX_SIZE = 16      // Max elements in matrix (e.g., 4x4 = 16)
+    parameter MATRIX_SIZE = 196      // Max elements in matrix (e.g., 14x14 = 196)
 )(
     input wire clk,
     input wire rst_n,

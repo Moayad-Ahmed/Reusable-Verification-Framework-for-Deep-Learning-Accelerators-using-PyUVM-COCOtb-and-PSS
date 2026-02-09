@@ -18,7 +18,7 @@ module CNN_top #(
     parameter OUTPUT_SIZE      = 10,
     // Activation-specific parameters
     parameter ACT_DATA_WIDTH   = 8,
-    parameter ACT_MATRIX_SIZE  = 16
+    parameter ACT_MATRIX_SIZE  = 196
 ) (
     input wire clk,
     input wire rst_n,
