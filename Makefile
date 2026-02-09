@@ -4,12 +4,13 @@ SIM ?= questa-compat
 TOPLEVEL_LANG ?= verilog
 
 # Add questa installation path to PATH
-ifeq ($(SIM),questa-compat)
+ifneq ($(filter clean cleanall,$(MAKECMDGOALS)),clean cleanall)
+ifneq (,$(filter $(SIM),questa questa-compat))
 ifndef QUESTA_HOME
 $(error QUESTA_HOME is not set. Please set it to your Questa installation path)
 endif
-
-export PATH := $(QUESTA_HOME):$(PATH)
+export PATH := $(QUESTA_HOME)/win64:$(PATH)
+endif
 endif
 
 # Add Python source directories to PYTHONPATH (use ; separator for Windows)
