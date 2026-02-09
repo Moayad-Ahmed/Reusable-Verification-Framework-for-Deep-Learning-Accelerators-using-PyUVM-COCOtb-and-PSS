@@ -226,3 +226,23 @@ class Activation_Softmax_Test(uvm_test):
         await softmax_seq.start(self.sqr)
         await ClockCycles(cocotb.top.clk, 10)
         self.drop_objection()
+
+
+@pyuvm.test()
+class Conv_Activation_Pool_FC_Test(uvm_test):
+    """Test Conv Activation Pool FC Layer"""
+    def build_phase(self):
+        self.My_Env = My_Env("My_Env", self)
+
+    def end_of_elaboration_phase(self):
+        self.sqr = ConfigDB().get(None, "", "SEQR")
+
+    async def run_phase(self):
+        cocotb.start_soon(Clock(cocotb.top.clk, 2, "ns").start())
+        conv_act_pool_fc_seq = ChainedLayerSequence("conv_act_pool_fc_seq", yaml_file_path("conv_act_pool_fc.yaml"))
+
+        self.raise_objection()
+        await conv_act_pool_fc_seq.start(self.sqr)
+        await ClockCycles(cocotb.top.clk, 10)
+        self.drop_objection()
+
