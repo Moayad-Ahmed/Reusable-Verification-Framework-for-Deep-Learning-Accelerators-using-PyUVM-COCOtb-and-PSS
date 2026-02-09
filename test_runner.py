@@ -37,10 +37,15 @@ def test_cnn_runner():
     clean_previous_run(root_dir)
 
     # QuestaSim installation path
-    questa_bin_path = r"C:\questasim64_10.6c\win64"
+    questa_path = os.getenv("QUESTA_HOME")
+
+    if not questa_path:
+        raise RuntimeError(
+            "QUESTA_HOME is not set. Please set it to your Questa installation directory."
+        )
     
     # Add it to the START of the system path so it is found first
-    os.environ["PATH"] = questa_bin_path + os.pathsep + os.environ["PATH"]
+    os.environ["PATH"] = questa_path + os.pathsep + os.environ["PATH"]
 
     rtl_dir = root_dir / "rtl"
     verilog_sources = [

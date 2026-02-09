@@ -4,7 +4,7 @@ SIM ?= questa-compat
 TOPLEVEL_LANG ?= verilog
 
 # Add questa installation path to PATH
-export PATH := C:\questasim64_10.6c\win64:$(PATH)
+export PATH := $(QUESTA_HOME):$(PATH)
 
 # Add Python source directories to PYTHONPATH (use ; separator for Windows)
 export PYTHONPATH := $(PWD)/pyuvm_components;$(PWD)/strategy;$(PWD)/utils;$(PYTHONPATH)
