@@ -1,5 +1,5 @@
 import numpy as np
-from LayerStrategy import LayerStrategy
+from strategy.LayerStrategy import LayerStrategy
 
 class FullyConnectedStrategy(LayerStrategy):
     """Strategy for fully connected (linear/dense) layers with separated data generation"""

@@ -1,4 +1,4 @@
-from LayerStrategy import LayerStrategy
+from strategy.LayerStrategy import LayerStrategy
 import torch
 import torch.nn as nn
 import numpy as np

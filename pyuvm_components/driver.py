@@ -1,5 +1,5 @@
 from pyuvm import *
-from cnn_utils import CNN_BFM
+from utils.cnn_utils import CNN_BFM
 
 class My_Driver(uvm_driver):
     def start_of_simulation_phase(self):

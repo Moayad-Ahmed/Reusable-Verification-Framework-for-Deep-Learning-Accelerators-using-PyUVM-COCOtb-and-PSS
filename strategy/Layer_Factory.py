@@ -1,6 +1,6 @@
-from convolution_strategy import ConvolutionStrategy
-from pooling_strategy import PoolingStrategy
-from fullyconnected_strategy import FullyConnectedStrategy
+from strategy.convolution_strategy import ConvolutionStrategy
+from strategy.pooling_strategy import PoolingStrategy
+from strategy.fullyconnected_strategy import FullyConnectedStrategy
 
 class LayerFactory:
     _strategies = {

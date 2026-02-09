@@ -1,6 +1,6 @@
 from pyuvm import *
-from agent import My_Agent
-from scoreboard import My_Scoreboard
+from pyuvm_components.agent import My_Agent
+from pyuvm_components.scoreboard import My_Scoreboard
 
 class My_Env(uvm_env):
 

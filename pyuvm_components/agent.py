@@ -1,6 +1,6 @@
 from pyuvm import *
-from monitor import My_Monitor
-from driver import My_Driver
+from pyuvm_components.monitor import My_Monitor
+from pyuvm_components.driver import My_Driver
 
 class My_Agent(uvm_agent):
     def build_phase(self):

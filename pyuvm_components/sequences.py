@@ -1,10 +1,10 @@
 from pyuvm import *
-from seq_item import GenericLayerTransaction
+from pyuvm_components.seq_item import GenericLayerTransaction
 import yaml
 import numpy as np
-from Layer_Factory import LayerFactory
+from strategy.Layer_Factory import LayerFactory
 from math import floor
-from cnn_utils import CNN_BFM
+from utils.cnn_utils import CNN_BFM
 
 
 class ConfigDrivenSequence(uvm_sequence):

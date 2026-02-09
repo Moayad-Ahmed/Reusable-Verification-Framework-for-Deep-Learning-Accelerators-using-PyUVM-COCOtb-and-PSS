@@ -1,4 +1,4 @@
-from LayerStrategy import LayerStrategy
+from strategy.LayerStrategy import LayerStrategy
 import numpy as np
 
 class ConvolutionStrategy(LayerStrategy):

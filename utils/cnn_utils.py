@@ -1,8 +1,8 @@
 from pyuvm import *
-from pooling_utils import PoolingBFM
-from convolution_utils import ConvolutionBFM
 from cocotb.triggers import RisingEdge
-from fc_utils import FullyConnectedBFM
+from utils.pooling_utils import PoolingBFM
+from utils.convolution_utils import ConvolutionBFM
+from utils.fc_utils import FullyConnectedBFM
 
 class CNN_BFM(metaclass=utility_classes.Singleton):
     def __init__(self):
