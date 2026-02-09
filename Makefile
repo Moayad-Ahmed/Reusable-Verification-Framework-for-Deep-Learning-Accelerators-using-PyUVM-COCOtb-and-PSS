@@ -10,6 +10,7 @@ $(error QUESTA_HOME is not set. Please set it to your Questa installation path)
 endif
 
 export PATH := $(QUESTA_HOME):$(PATH)
+endif
 
 # Add Python source directories to PYTHONPATH (use ; separator for Windows)
 export PYTHONPATH := $(PWD)/pyuvm_components;$(PWD)/strategy;$(PWD)/utils;$(PYTHONPATH)
