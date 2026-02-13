@@ -27,6 +27,9 @@ VERILOG_INCLUDE_DIRS += $(PWD)/rtl/spec/manual
 VERILOG_INCLUDE_DIRS += $(PWD)/rtl/vmod/defs
 
 COMPILE_ARGS += -f $(PWD)/rtl_sources.f
+ifeq ($(SIM),questa-compat)
+COMPILE_ARGS += +define+SYNTHESIS
+endif
 
 VERILOG_SOURCES += $(PWD)/rtl/dram.sv
 VERILOG_SOURCES += $(PWD)/rtl/NVDLA_top.sv
