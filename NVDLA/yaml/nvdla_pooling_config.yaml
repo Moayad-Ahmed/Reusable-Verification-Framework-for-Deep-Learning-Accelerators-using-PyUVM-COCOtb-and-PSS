@@ -20,7 +20,7 @@ test_suite:
           # Input/Output Dimensions
           # After padding: 6x6
           input_shape: [1, 1]       # [height, width]
-          data_range: [33,35]      # [min, max] for INT8
+          data_range: [-128,127]      # [min, max] for INT8
           
           # Padding Configuration (matching NVDLA register 0x2C10)
           # Register: D_POOLING_PADDING_CFG = 0x00000022

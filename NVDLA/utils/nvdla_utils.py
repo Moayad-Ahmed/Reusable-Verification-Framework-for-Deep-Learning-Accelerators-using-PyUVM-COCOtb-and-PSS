@@ -28,6 +28,7 @@ class NvdlaBFM(metaclass=utility_classes.Singleton):
     def __init__(self):
         self.dut = cocotb.top
         self.output_config_queue = Queue(maxsize=0)
+        self.iteration_done_queue = Queue(maxsize=0)
         self.axi_master = None
 
     # ---- Reset Control ----

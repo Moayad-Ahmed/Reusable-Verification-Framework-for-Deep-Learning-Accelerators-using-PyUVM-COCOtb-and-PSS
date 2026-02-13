@@ -6,6 +6,7 @@ import yaml
 from strategy.regs_configs import RegistrationConfigs
 from strategy.pooling_strategy import PoolingStrategy
 from strategy.Layer_Factory import LayerFactory
+from utils.nvdla_utils import NvdlaBFM
 
 
 class PdpTestSequence(uvm_sequence):
@@ -40,7 +41,7 @@ class PdpTestSequence(uvm_sequence):
             with open(self.input_file, 'w') as f:
                 for byte_val in input_bytes:
                     # Convert value to bytes (little-endian)
-                    value_bytes = byte_val.to_bytes(bytes_per_element, byteorder='little', signed=False)
+                    value_bytes = byte_val.to_bytes(bytes_per_element, byteorder='little', signed=True)
                     
                     # Write each byte of the value
                     for b in value_bytes:
@@ -75,36 +76,48 @@ class PdpTestSequence(uvm_sequence):
 
     async def body(self):
         strategy = LayerFactory.create_strategy('pooling')
-        seq_item = PdpTransaction("pdp_tx",strategy)
-
         # Load YAML configuration
         config = self.load_yaml_config()
-        
-        # Generate input data
-        input_data = strategy.generate_input_data(config)
-        # Compute golden output
-        expected_output = strategy.compute_golden(input_data, config)
-        # Flatten to 1D byte array
-        input_bytes = input_data.flatten().astype(np.int8).tolist()
-        expected_bytes = expected_output.flatten().astype(np.int8).tolist()
+        bfm = NvdlaBFM()
+        num_iterations = 20
 
-        # Write input data to file
-        self.write_input_data_to_file(input_bytes, config)
-        
-        # ----- Input DRAM data -----
-        seq_item.input_file = self.input_file
-        seq_item.input_base_addr = 0
-        # Each logical value is stored as 8 bytes (64 bits) in the .dat file
-        seq_item.input_byte_count = len(input_bytes) * 8
+        for i in range(num_iterations):
+            seq_item = PdpTransaction("pdp_tx", strategy)
 
-        # ----- PDP + PDP-RDMA register writes -----
-        # Organized by functional groups for better readability
-        seq_item.reg_configs = RegistrationConfigs().pooling_configs()
+            # Generate input data
+            input_data = strategy.generate_input_data(config)
+            # Compute golden output
+            expected_output = strategy.compute_golden(input_data, config)
+            # Flatten to 1D byte array
+            input_bytes = input_data.flatten().astype(np.int8).tolist()
+            expected_bytes = expected_output.flatten().astype(np.int8).tolist()
 
-        # ----- Expected output info (from golden model) -----
-        seq_item.output_base_addr = 0x100     # DST_BASE_ADDR_LOW
-        seq_item.output_length = len(expected_bytes)
-        seq_item.expected_output_data = expected_bytes
+            # Write input data to file
+            self.write_input_data_to_file(input_bytes, config)
 
-        await self.start_item(seq_item)
-        await self.finish_item(seq_item)
+            # ----- Input DRAM data -----
+            seq_item.input_file = self.input_file
+            seq_item.input_base_addr = 0
+            # Each logical value is stored as 8 bytes (64 bits) in the .dat file
+            seq_item.input_byte_count = len(input_bytes) * 8
+
+            # ----- PDP + PDP-RDMA register writes -----
+            # Organized by functional groups for better readability
+            seq_item.reg_configs = RegistrationConfigs().pooling_configs(config)
+
+            # ----- Expected output info (from golden model) -----
+            seq_item.output_base_addr = 0x100     # DST_BASE_ADDR_LOW
+            seq_item.output_length = len(expected_bytes)
+            seq_item.expected_output_data = expected_bytes
+
+            await self.start_item(seq_item)
+            await self.finish_item(seq_item)
+
+            # Wait for the scoreboard to finish checking this iteration
+            await bfm.iteration_done_queue.get()
+            print(f"Iteration {i} checked by scoreboard.")
+
+            # Reset the BFM between iterations (skip after the last one)
+            if i < num_iterations - 1:
+                print(f"Resetting BFM before iteration {i + 1}...")
+                await bfm.reset()

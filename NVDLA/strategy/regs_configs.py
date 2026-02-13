@@ -5,7 +5,7 @@ from strategy.Layers_regs_addresses import PDP_RDMA_REG
 
 
 class RegistrationConfigs:
-    def pooling_configs(self):
+    def pooling_configs(self, layer_configs):
         return [  
             # PDP CORE - Status and Control
             (PDP_REG.S_STATUS, 0x00000000),

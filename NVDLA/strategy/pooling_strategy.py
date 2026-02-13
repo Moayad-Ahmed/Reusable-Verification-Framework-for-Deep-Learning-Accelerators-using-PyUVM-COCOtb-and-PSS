@@ -100,13 +100,13 @@ class PoolingStrategy(LayerStrategy):
         low, high = config['data_range']
         
         # Generate random input
-        # return np.random.randint(low, high, size=(h, w))
-        return np.full((h, w), fill_value=35, dtype=int)  # Use constant value for easier debugging
+        return np.random.randint(low, high, size=(h, w))
+        #return np.full((h, w), fill_value=35, dtype=int)  # Use constant value for easier debugging
     
     def compute_golden(self, input_data, config):
         """
         Golden model that matches 8-bit Integer Hardware.
-        Supports: MAX, MIN, and AVG (with floor rounding).
+        Supports: MAX, MIN, and AVG (with rounding).
         Optionally applies padding before pooling.
         
         Args:
@@ -183,8 +183,8 @@ class PoolingStrategy(LayerStrategy):
                 # CRITICAL FOR HARDWARE MATCHING:
                 # Hardware does integer division (e.g., 50 // 4 = 12).
                 # PyTorch does float division (e.g., 50 / 4 = 12.5).
-                # We must FLOOR (truncate) the result to match hardware.
-                output = torch.floor(output)
+                # We must round the result to match hardware.
+                output = torch.round(output)
         
         # 2. Convert back to Numpy (remove batch and channel dims, keep spatial dims)
         result = output.squeeze(0).squeeze(0).numpy()
