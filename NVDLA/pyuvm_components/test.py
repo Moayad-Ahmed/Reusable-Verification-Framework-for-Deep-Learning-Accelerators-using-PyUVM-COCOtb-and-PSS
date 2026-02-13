@@ -1,7 +1,7 @@
 import cocotb
 import pyuvm
 from cocotb.clock import Clock
-from cocotb.triggers import ClockCycles
+from cocotb.triggers import ClockCycles, RisingEdge
 from pyuvm import *
 from pyuvm_components.env import NVDLA_Env
 from pyuvm_components.sequences import PdpTestSequence
@@ -44,7 +44,11 @@ class PdpBasicTest(uvm_test):
 
         await pdp_test.start(self.sqr)
 
-        # Wait for the PDP pipeline to complete and interrupt to fire
-        await ClockCycles(cocotb.top.dla_core_clk, 50000)
+        # Wait for NVDLA interrupt to fire
+        while cocotb.top.dla_intr.value != 1:
+            await RisingEdge(cocotb.top.dla_core_clk)
+
+        # Wait some extra cycles to ensure that the scoreboard has completed its checks
+        await ClockCycles(cocotb.top.dla_core_clk, 1000)
 
         self.drop_objection()
