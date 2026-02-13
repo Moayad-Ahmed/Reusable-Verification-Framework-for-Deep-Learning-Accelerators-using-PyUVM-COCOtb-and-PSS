@@ -1,7 +1,7 @@
-*.ini
-*.xml
-transcript
-pyuvm_components/__pycache__/
-strategy/__pycache__/
-utils/__pycache__/
-sim_build/
+Standalone_Layers/*.ini
+Standalone_Layers/*.xml
+Standalone_Layers/transcript
+Standalone_Layers/pyuvm_components/__pycache__/
+Standalone_Layers/strategy/__pycache__/
+Standalone_Layers/utils/__pycache__/
+Standalone_Layers/sim_build/
