@@ -50,6 +50,7 @@ report_code_coverage:
 cleanall:
 	@rm -rf __pycache__
 	@rm -rf pyuvm_components/__pycache__
+	@rm -rf strategy/__pycache__
 	@rm -rf utils/__pycache__
 	@rm -rf sim_build
 	@rm -rf .pytest_cache
