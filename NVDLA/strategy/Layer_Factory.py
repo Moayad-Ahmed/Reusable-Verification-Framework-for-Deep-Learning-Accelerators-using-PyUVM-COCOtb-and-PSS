@@ -1,4 +1,4 @@
-from pooling_strategy import PoolingStrategy
+from strategy.pooling_strategy import PoolingStrategy
 
 class LayerFactory:
     _strategies = {

@@ -12,28 +12,14 @@ class NVDLA_Monitor(uvm_monitor):
         while True:
             # Wait until the driver tells us where the output address and length are
             recieved_seq_item = await self.bfm.output_config_queue.get()
-            layer_name, output_base_addr, output_length, expected_output_data, expected_crc = recieved_seq_item
+            
 
             # Wait for the NVDLA interrupt for inference completion
             await self.bfm.wait_for_interrupt()
 
             # Read the output surface and compute CRC
-            actual_output_data = await self.bfm.read_from_dram(output_base_addr, output_length)            
-            actual_crc = self.bfm.calc_crc32(actual_output_data)
+            actual_output_data = await self.bfm.read_from_dram(recieved_seq_item.output_base_addr, recieved_seq_item.output_length)            
 
-            # Build a result transaction and send it to the scoreboard
-            if layer_name == "pooling":
-                result = PdpTransaction("pdp_result")
-            else:
-                # Dummy line to avoid error -> replace with the new transaction class added in the future
-                result = PdpTransaction("generic_result")
-            
-            result.layer_name = layer_name
-            result.output_base_addr = output_base_addr
-            result.output_length = output_length
-            result.actual_crc = actual_crc
-            result.actual_output_data = actual_output_data
-            result.expected_crc = expected_crc
-            result.expected_output_data = expected_output_data
+            recieved_seq_item.actual_output_data = actual_output_data
 
-            self.mon_ap.write(result)
+            self.mon_ap.write(recieved_seq_item)

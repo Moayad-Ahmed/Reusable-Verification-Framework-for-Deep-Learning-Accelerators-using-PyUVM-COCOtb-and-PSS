@@ -20,13 +20,10 @@ class NVDLA_Driver(uvm_driver):
 
 
             # Tell the monitor where to look for results and the expected output data and CRC
-            await self.bfm.output_config_queue.put(
-                (seq_item.layer_name, seq_item.output_base_addr, seq_item.output_length, 
-                 seq_item.expected_output_data, seq_item.expected_crc)
-            )
+            await self.bfm.output_config_queue.put(seq_item)
 
             # Write all CSB registers
-            for addr, data in seq_item.register_writes.items():
+            for addr, data in seq_item.reg_configs:
                 await self.bfm.reg_write(addr, data)
 
             self.seq_item_port.item_done()

@@ -10,10 +10,15 @@ import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INPUT_DIR = os.path.join(BASE_DIR, "..", "input_files")
+CONFIG_DIR = os.path.join(BASE_DIR, "..", "yaml")
 
 
 def input_file_path(filename):
     return os.path.join(INPUT_DIR, filename)
+
+
+def config_file_path(filename):
+    return os.path.join(CONFIG_DIR, filename)
 
 
 @pyuvm.test()
@@ -38,6 +43,7 @@ class PdpBasicTest(uvm_test):
         pdp_test = PdpTestSequence(
             "pdp_test",
             input_file=input_file_path("pdp_1x1x1_3x3_ave_int8_0_in.dat"),
+            config_file=config_file_path("nvdla_pooling_config.yaml")
         )
 
         self.raise_objection()

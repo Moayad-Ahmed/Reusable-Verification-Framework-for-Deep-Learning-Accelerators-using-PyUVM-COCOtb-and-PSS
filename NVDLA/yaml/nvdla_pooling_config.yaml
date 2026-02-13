@@ -1,0 +1,41 @@
+# NVDLA PDP Pooling Test Configuration
+# Test based on actual NVDLA register values from:
+# D_POOLING_KERNEL_CFG: 0x00110202 (3x3 kernel, 3x3 stride)
+# D_POOLING_PADDING_CFG: 0x00000022 (left=2, right=0, top=0, bottom=0)
+# D_OPERATION_MODE_CFG: 0x00000010 (AVG pooling, OFF_FLYING mode)
+# D_DATA_FORMAT: 0x00000000 (INT8)
+
+test_suite:
+  - name: "NVDLA_3x3_AVG_Pooling_with_Padding"
+    description: "3x3 Average Pooling with left padding of 2 pixels"
+    
+    layers:
+      - type: "pooling"
+        config:
+          # Pooling Operation Parameters
+          kernel_size: 3
+          stride: 3
+          pool_type: "avg"          # 0=AVG, 1=MAX, 2=MIN
+          
+          # Input/Output Dimensions
+          # After padding: 6x6
+          input_shape: [1, 1]       # [height, width]
+          data_range: [33,35]      # [min, max] for INT8
+          
+          # Padding Configuration (matching NVDLA register 0x2C10)
+          # Register: D_POOLING_PADDING_CFG = 0x00000022
+          # Bits [2:0]=L=2, [5:3]=R=0, [8:6]=T=0, [11:9]=B=0
+          padding_left: 2
+          padding_right: 0
+          padding_top: 2
+          padding_bottom: 0
+          padding_value: 16          # Pad fill value (INT8)
+          
+          # Data Format
+          data_format: "INT8"       # INT8, INT16, or FP16
+          
+          # Hardware Configuration Reference
+          # D_DATA_CUBE_IN_WIDTH:  0x00000003  (4-1, 0-indexed)
+          # D_DATA_CUBE_IN_HEIGHT: 0x00000005  (6-1, 0-indexed)
+          # D_DATA_CUBE_OUT_WIDTH: 0x00000001  (2-1, 0-indexed)
+          # D_DATA_CUBE_OUT_HEIGHT: 0x00000001  (2-1, 0-indexed)
