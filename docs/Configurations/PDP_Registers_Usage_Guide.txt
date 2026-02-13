@@ -1,0 +1,782 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║           NVDLA PDP & PDP_RDMA REGISTERS - PRACTICAL USAGE GUIDE             ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+This document provides concise usage instructions for all PDP and PDP_RDMA 
+registers, including bit fields, values, and practical examples.
+
+═══════════════════════════════════════════════════════════════════════════════
+                          PDP MODULE (Base: 0xB000)
+═══════════════════════════════════════════════════════════════════════════════
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 1. S_STATUS (0xB000 / 0x2C00)                                    [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Status of both register groups (Group 0 and Group 1)               │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [1:0]   STATUS_0  - Group 0 status                                        │
+│   [17:16] STATUS_1  - Group 1 status                                        │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = IDLE     - Ready for new configuration                              │
+│   0x1 = RUNNING  - Currently executing pooling operation                    │
+│   0x2 = PENDING  - Configured and waiting to execute                        │
+│                                                                              │
+│ USAGE:                                                                       │
+│   status = read_reg(S_STATUS);                                              │
+│   group0_status = status & 0x3;                                             │
+│   group1_status = (status >> 16) & 0x3;                                     │
+│   // Check if group is idle before configuring                              │
+│   if (group0_status == 0x0) { /* safe to configure group 0 */ }            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 2. S_POINTER (0xB004 / 0x2C01)                                   [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Selects which register group (0 or 1) software writes to           │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0]  PRODUCER - Which group SW configures (RW)                            │
+│   [16] CONSUMER - Which group HW is using (RO)                              │
+│                                                                              │
+│ VALUES:                                                                      │
+│   PRODUCER: 0 = Configure Group 0,  1 = Configure Group 1                   │
+│   CONSUMER: 0 = HW using Group 0,   1 = HW using Group 1                    │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(S_POINTER, 0x0);  // Select Group 0 for configuration           │
+│   write_reg(S_POINTER, 0x1);  // Select Group 1 for configuration           │
+│   // Always set before configuring D_* registers                            │
+│   // Enables ping-pong buffering for pipeline parallelism                   │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 3. D_OP_ENABLE (0xB008 / 0x2C02)                                 [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Trigger to start pooling operation                                 │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] OP_EN - Operation enable                                              │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = DISABLE - No operation                                              │
+│   0x1 = ENABLE  - Start pooling (auto-clears after operation)               │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // Configure all other registers first, then:                             │
+│   write_reg(D_OP_ENABLE, 0x1);  // Start operation                          │
+│   // Hardware will clear this bit when done                                 │
+│   // This is the LAST register to write in configuration sequence           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 4. D_DATA_CUBE_IN_WIDTH (0xB00C / 0x2C03)                        [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Width of input feature map                                         │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [12:0] CUBE_IN_WIDTH                                                      │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0 to 8191 (represents 1 to 8192 pixels)                                   │
+│   Actual width = register_value + 1                                         │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DATA_CUBE_IN_WIDTH, 223);   // 224 pixels wide                │
+│   write_reg(D_DATA_CUBE_IN_WIDTH, 0);     // 1 pixel wide                   │
+│   write_reg(D_DATA_CUBE_IN_WIDTH, 8191);  // 8192 pixels wide (max)         │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 5. D_DATA_CUBE_IN_HEIGHT (0xB010 / 0x2C04)                       [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Height of input feature map                                        │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [12:0] CUBE_IN_HEIGHT                                                     │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0 to 8191 (represents 1 to 8192 pixels)                                   │
+│   Actual height = register_value + 1                                        │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DATA_CUBE_IN_HEIGHT, 223);  // 224 pixels tall                │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 6. D_DATA_CUBE_IN_CHANNEL (0xB014 / 0x2C05)                      [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Number of channels in input feature map                            │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [12:0] CUBE_IN_CHANNEL                                                    │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0 to 8191 (represents 1 to 8192 channels)                                 │
+│   Actual channels = register_value + 1                                      │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DATA_CUBE_IN_CHANNEL, 63);   // 64 channels                   │
+│   write_reg(D_DATA_CUBE_IN_CHANNEL, 511);  // 512 channels                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 7-9. D_DATA_CUBE_OUT_WIDTH/HEIGHT/CHANNEL                        [READ/WRITE]│
+│      (0xB018-0xB020 / 0x2C06-0x2C08)                                         │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Output feature map dimensions after pooling                        │
+│                                                                              │
+│ BIT LAYOUT: Same as input (bits [12:0]), value+1 encoding                   │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // Example: 224×224×64 → 112×112×64 with 2×2 pool, stride 2               │
+│   write_reg(D_DATA_CUBE_OUT_WIDTH, 111);    // 112 pixels                   │
+│   write_reg(D_DATA_CUBE_OUT_HEIGHT, 111);   // 112 pixels                   │
+│   write_reg(D_DATA_CUBE_OUT_CHANNEL, 63);   // 64 channels                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 10. D_OPERATION_MODE_CFG (0xB024 / 0x2C09)                       [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Pooling method, data source, and split configuration               │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [1:0]   POOLING_METHOD - Pooling algorithm                                │
+│   [4]     FLYING_MODE    - Data source selection                            │
+│   [15:8]  SPLIT_NUM      - Number of horizontal splits (0-255)              │
+│                                                                              │
+│ POOLING_METHOD VALUES:                                                      │
+│   0x0 = AVERAGE - Average pooling                                           │
+│   0x1 = MAX     - Max pooling (most common)                                 │
+│   0x2 = MIN     - Min pooling                                               │
+│                                                                              │
+│ FLYING_MODE VALUES:                                                         │
+│   0x0 = ON_FLYING  - Data comes directly from SDP (faster, pipeline mode)   │
+│   0x1 = OFF_FLYING - Data read from memory via DMA                          │
+│                                                                              │
+│ SPLIT_NUM VALUES:                                                           │
+│   0 = 1 split (no splitting, normal operation)                              │
+│   1 = 2 splits, 3 = 4 splits, 7 = 8 splits, etc.                            │
+│   Split count = SPLIT_NUM + 1                                               │
+│                                                                              │
+│ USAGE EXAMPLES:                                                              │
+│   write_reg(D_OPERATION_MODE_CFG, 0x0001);  // Max pool, on-flying          │
+│   write_reg(D_OPERATION_MODE_CFG, 0x0011);  // Max pool, from memory        │
+│   write_reg(D_OPERATION_MODE_CFG, 0x0010);  // Avg pool, from memory        │
+│   write_reg(D_OPERATION_MODE_CFG, 0x0311);  // Max pool, 4 splits           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 11. D_NAN_FLUSH_TO_ZERO (0xB028 / 0x2C0A)                        [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Convert NaN (Not-a-Number) values to zero before pooling           │
+│          Only works in OFF_FLYING mode                                       │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] NAN_TO_ZERO                                                           │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = DISABLE - Keep NaN values (propagate through)                       │
+│   0x1 = ENABLE  - Replace NaN with 0.0 before pooling                       │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_NAN_FLUSH_TO_ZERO, 0x1);  // Robust: flush NaN to zero        │
+│   write_reg(D_NAN_FLUSH_TO_ZERO, 0x0);  // Preserve NaN for debugging       │
+│   // Check D_NAN_INPUT_NUM after operation to see if NaN detected           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 12. D_PARTIAL_WIDTH_IN (0xB02C / 0x2C0B)                         [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Define width of each split when using split mode                   │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [9:0]   PARTIAL_WIDTH_IN_FIRST - Width of first split                     │
+│   [19:10] PARTIAL_WIDTH_IN_LAST  - Width of last split                      │
+│   [29:20] PARTIAL_WIDTH_IN_MID   - Width of middle splits                   │
+│                                                                              │
+│ VALUES:                                                                      │
+│   Each field: 0-1023 (represents 1-1024 pixels, value+1 encoding)           │
+│                                                                              │
+│ USAGE (4 splits of 512 pixels each for 2048 wide input):                    │
+│   write_reg(D_PARTIAL_WIDTH_IN, 0x1FF1FF1FF);                               │
+│   // FIRST=511 (512px), MID=511 (512px), LAST=511 (512px)                   │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 13. D_PARTIAL_WIDTH_OUT (0xB030 / 0x2C0C)                        [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Define output width of each split after pooling                    │
+│                                                                              │
+│ BIT LAYOUT: Same as D_PARTIAL_WIDTH_IN                                      │
+│   [9:0]   PARTIAL_WIDTH_OUT_FIRST                                           │
+│   [19:10] PARTIAL_WIDTH_OUT_LAST                                            │
+│   [29:20] PARTIAL_WIDTH_OUT_MID                                             │
+│                                                                              │
+│ USAGE (512→256 after 2×2 pooling):                                          │
+│   write_reg(D_PARTIAL_WIDTH_OUT, 0x0FF0FF0FF);                              │
+│   // Each split outputs 256 pixels (255+1)                                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 14. D_POOLING_KERNEL_CFG (0xB034 / 0x2C0D)                       [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Pooling kernel size and stride                                     │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [3:0]   KERNEL_WIDTH         - Kernel width (encoded)                     │
+│   [11:8]  KERNEL_HEIGHT        - Kernel height (encoded)                    │
+│   [19:16] KERNEL_STRIDE_WIDTH  - Horizontal stride                          │
+│   [23:20] KERNEL_STRIDE_HEIGHT - Vertical stride                            │
+│                                                                              │
+│ KERNEL SIZE ENCODING (0x0=1, 0x1=2, 0x2=3, ... 0x7=8):                      │
+│   0x0 = 1×1,  0x1 = 2×2,  0x2 = 3×3,  0x3 = 4×4                             │
+│   0x4 = 5×5,  0x5 = 6×6,  0x6 = 7×7,  0x7 = 8×8                             │
+│                                                                              │
+│ STRIDE VALUES (0x0=1, 0x1=2, ... 0xF=16):                                   │
+│   Actual stride = encoded_value + 1                                         │
+│                                                                              │
+│ USAGE EXAMPLES:                                                              │
+│   write_reg(D_POOLING_KERNEL_CFG, 0x00010101);  // 2×2 kernel, stride 2×2   │
+│   write_reg(D_POOLING_KERNEL_CFG, 0x00000000);  // 1×1 kernel, stride 1×1   │
+│   write_reg(D_POOLING_KERNEL_CFG, 0x00020202);  // 3×3 kernel, stride 3×3   │
+│                                                                              │
+│ COMMON CONFIGURATIONS:                                                       │
+│   0x00010101 = 2×2 MaxPool stride 2 (most common downsampling)              │
+│   0x00020202 = 3×3 MaxPool stride 3                                         │
+│   0x00000101 = 2×2 kernel stride 1 (overlapping pooling)                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 15. D_RECIP_KERNEL_WIDTH (0xB038 / 0x2C0E)                       [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Reciprocal of kernel width for average pooling division            │
+│          Only used when POOLING_METHOD = AVERAGE                             │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [16:0] RECIP_KERNEL_WIDTH                                                 │
+│                                                                              │
+│ VALUES:                                                                      │
+│   INT8/INT16: value = (1.0 / kernel_width) * 65536                          │
+│   FP16:       value = 1.0 / kernel_width (IEEE 754 half-precision)          │
+│                                                                              │
+│ USAGE FOR AVERAGE POOLING:                                                   │
+│   // For 2×2 average pooling (INT mode):                                    │
+│   recip = (1.0 / 2) * 65536 = 32768 = 0x8000                                │
+│   write_reg(D_RECIP_KERNEL_WIDTH, 0x8000);                                  │
+│                                                                              │
+│   // For 3×3 average pooling (INT mode):                                    │
+│   recip = (1.0 / 3) * 65536 = 21845 = 0x5555                                │
+│   write_reg(D_RECIP_KERNEL_WIDTH, 0x5555);                                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 16. D_RECIP_KERNEL_HEIGHT (0xB03C / 0x2C0F)                      [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Reciprocal of kernel height for average pooling                    │
+│                                                                              │
+│ BIT LAYOUT & USAGE: Same as D_RECIP_KERNEL_WIDTH                            │
+│                                                                              │
+│ EXAMPLE: For 2×2 average pooling                                            │
+│   write_reg(D_RECIP_KERNEL_HEIGHT, 0x8000);  // 1/2 in fixed-point          │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 17. D_POOLING_PADDING_CFG (0xB040 / 0x2C10)                      [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Padding pixels to add around input borders                         │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [2:0]   PAD_LEFT   - Left padding (0-7 pixels)                            │
+│   [6:4]   PAD_TOP    - Top padding (0-7 pixels)                             │
+│   [10:8]  PAD_RIGHT  - Right padding (0-7 pixels)                           │
+│   [14:12] PAD_BOTTOM - Bottom padding (0-7 pixels)                          │
+│                                                                              │
+│ VALUES:                                                                      │
+│   Each field: 0x0 to 0x7 (0 to 7 pixels)                                    │
+│                                                                              │
+│ USAGE EXAMPLES:                                                              │
+│   write_reg(D_POOLING_PADDING_CFG, 0x0000);  // No padding                  │
+│   write_reg(D_POOLING_PADDING_CFG, 0x1111);  // 1 pixel all sides           │
+│   write_reg(D_POOLING_PADDING_CFG, 0x0021);  // Left=1, Top=2, others=0     │
+│                                                                              │
+│ PADDING EFFECT ON OUTPUT SIZE:                                              │
+│   Output = (Input + PAD_LEFT + PAD_RIGHT - KERNEL + STRIDE) / STRIDE        │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 18-24. D_POOLING_PADDING_VALUE_1-7_CFG                           [READ/WRITE]│
+│        (0xB044-0xB05C / 0x2C11-0x2C17)                                       │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Value to fill padded regions (one register per channel, max 8)     │
+│          Only significant for average pooling                                │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [18:0] PAD_VALUE_xX - Padding value for channel x                         │
+│                                                                              │
+│ VALUES:                                                                      │
+│   INT8/INT16: Signed integer value                                          │
+│   FP16:       IEEE 754 half-precision floating-point                        │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_POOLING_PADDING_VALUE_1_CFG, 0x0);        // Ch0: pad=0       │
+│   write_reg(D_POOLING_PADDING_VALUE_2_CFG, 0x3F800000); // Ch1: pad=1.0(FP) │
+│   // Typically set to 0 for average pooling                                 │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 25-26. D_SRC_BASE_ADDR_LOW/HIGH (0xB060-0xB064 / 0x2C18-0x2C19) [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: 64-bit source data address in memory (for OFF_FLYING mode)         │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   D_SRC_BASE_ADDR_LOW  [31:0] - Lower 32 bits of address                    │
+│   D_SRC_BASE_ADDR_HIGH [31:0] - Upper 32 bits of address                    │
+│                                                                              │
+│ USAGE:                                                                       │
+│   uint64_t src_addr = 0x80000000;                                           │
+│   write_reg(D_SRC_BASE_ADDR_LOW,  src_addr & 0xFFFFFFFF);                   │
+│   write_reg(D_SRC_BASE_ADDR_HIGH, src_addr >> 32);                          │
+│   // Ignored in ON_FLYING mode                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 27. D_SRC_LINE_STRIDE (0xB068 / 0x2C1A)                          [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Bytes between consecutive lines in source data                     │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] SRC_LINE_STRIDE - Stride in bytes                                  │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // For 224 width × 1 byte per pixel:                                      │
+│   write_reg(D_SRC_LINE_STRIDE, 224);                                        │
+│   // For 224 width × 2 bytes per pixel (FP16):                              │
+│   write_reg(D_SRC_LINE_STRIDE, 448);                                        │
+│   // Typical: width × bytes_per_pixel × channels                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 28. D_SRC_SURFACE_STRIDE (0xB06C / 0x2C1B)                       [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Bytes between consecutive channels/surfaces in source              │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] SRC_SURFACE_STRIDE - Stride in bytes                               │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // For 224×224 planar layout:                                             │
+│   write_reg(D_SRC_SURFACE_STRIDE, 224 * 224 * bytes_per_pixel);             │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 29-32. D_DST_BASE_ADDR_LOW/HIGH, D_DST_LINE_STRIDE, D_DST_SURFACE_STRIDE   │
+│        (0xB070-0xB07C / 0x2C1C-0x2C1F)                           [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Destination address and strides (same format as SRC)               │
+│                                                                              │
+│ USAGE:                                                                       │
+│   uint64_t dst_addr = 0x90000000;                                           │
+│   write_reg(D_DST_BASE_ADDR_LOW,  dst_addr & 0xFFFFFFFF);                   │
+│   write_reg(D_DST_BASE_ADDR_HIGH, dst_addr >> 32);                          │
+│   write_reg(D_DST_LINE_STRIDE, 112);  // Output width stride                │
+│   write_reg(D_DST_SURFACE_STRIDE, 112 * 112 * bytes_per_pixel);             │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 33. D_DST_RAM_CFG (0xB080 / 0x2C20)                              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Destination memory type selection                                  │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] DST_RAM_TYPE                                                          │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = CV - CVRAM (on-chip SRAM, faster)                                   │
+│   0x1 = MC - External memory (DRAM)                                         │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DST_RAM_CFG, 0x0);  // Write to CVRAM (on-chip)               │
+│   write_reg(D_DST_RAM_CFG, 0x1);  // Write to external memory               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 34. D_DATA_FORMAT (0xB084 / 0x2C21)                              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Input/output data precision format                                 │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [1:0] INPUT_DATA - Data type selection                                    │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = INT8  - 8-bit signed integer                                        │
+│   0x1 = INT16 - 16-bit signed integer                                       │
+│   0x2 = FP16  - IEEE 754 half-precision float                               │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DATA_FORMAT, 0x0);  // INT8 mode                              │
+│   write_reg(D_DATA_FORMAT, 0x2);  // FP16 mode (most flexible)              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 35-37. D_INF/NAN_INPUT_NUM, D_NAN_OUTPUT_NUM                     [READ ONLY] │
+│        (0xB088-0xB090 / 0x2C22-0x2C24)                                       │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Counters for infinity and NaN values detected                      │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] Count value                                                        │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // After operation completes:                                             │
+│   inf_count = read_reg(D_INF_INPUT_NUM);                                    │
+│   nan_in = read_reg(D_NAN_INPUT_NUM);                                       │
+│   nan_out = read_reg(D_NAN_OUTPUT_NUM);                                     │
+│   if (nan_in > 0) { printf("Warning: %u NaN in input\n", nan_in); }         │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 38. D_PERF_ENABLE (0xB094 / 0x2C25)                              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Enable DMA performance counter                                     │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] DMA_EN                                                                │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = DISABLE - Don't count performance metrics                           │
+│   0x1 = ENABLE  - Enable D_PERF_WRITE_STALL counter                         │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_PERF_ENABLE, 0x1);  // Enable before operation                │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 39. D_PERF_WRITE_STALL (0xB098 / 0x2C26)                         [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Number of cycles write DMA was stalled                             │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] PERF_WRITE_STALL - Cycle count                                     │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_PERF_ENABLE, 0x1);  // Enable first                           │
+│   // Run operation...                                                       │
+│   stall_cycles = read_reg(D_PERF_WRITE_STALL);                              │
+│   printf("Write stalled for %u cycles\n", stall_cycles);                    │
+│   // High values indicate memory bandwidth bottleneck                       │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 40. D_CYA (0xB09C / 0x2C27)                                       [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: "Cover Your Assets" - Reserved for post-silicon bug workarounds    │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] CYA - Implementation-specific                                      │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // Typically leave at 0x0 unless instructed by vendor                     │
+│   write_reg(D_CYA, 0x0);                                                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                      PDP_RDMA MODULE (Base: 0xA000)
+═══════════════════════════════════════════════════════════════════════════════
+
+NOTE: PDP_RDMA handles DMA READ operations. It works with PDP_RDMA only in
+      OFF_FLYING mode. In ON_FLYING mode, data comes directly from SDP and
+      PDP_RDMA is bypassed.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 1. S_STATUS (0xA000 / 0x2800)                                    [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Status of DMA read operation for both groups                       │
+│                                                                              │
+│ BIT LAYOUT & VALUES: Same as PDP S_STATUS                                   │
+│   [1:0]   STATUS_0 - Group 0 (0=IDLE, 1=RUNNING, 2=PENDING)                 │
+│   [17:16] STATUS_1 - Group 1                                                │
+│                                                                              │
+│ USAGE: Same as PDP S_STATUS                                                 │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 2. S_POINTER (0xA004 / 0x2801)                                   [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Select register group for DMA read configuration                   │
+│                                                                              │
+│ BIT LAYOUT & VALUES: Same as PDP S_POINTER                                  │
+│   [0]  PRODUCER (RW) - 0=Group 0, 1=Group 1                                 │
+│   [16] CONSUMER (RO) - Which group HW is using                              │
+│                                                                              │
+│ USAGE: Same as PDP S_POINTER                                                │
+│   // Should match PDP S_POINTER value                                       │
+│   write_reg(PDP_RDMA_S_POINTER, 0x0);  // Configure Group 0                 │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 3. D_OP_ENABLE (0xA008 / 0x2802)                                 [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Trigger DMA read operation                                         │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] OP_EN (0=DISABLE, 1=ENABLE)                                           │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_OP_ENABLE, 0x1);  // Start DMA read                           │
+│   // Configure PDP_RDMA before PDP or simultaneously                        │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 4-6. D_DATA_CUBE_IN_WIDTH/HEIGHT/CHANNEL                         [READ/WRITE]│
+│      (0xA00C-0xA014 / 0x2803-0x2805)                                         │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Input dimensions for DMA read (must match PDP configuration)       │
+│                                                                              │
+│ BIT LAYOUT & VALUES: Same as PDP input dimensions                           │
+│   [12:0] Value (0-8191 represents 1-8192, value+1 encoding)                 │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // Must match PDP D_DATA_CUBE_IN_* exactly                                │
+│   write_reg(D_DATA_CUBE_IN_WIDTH, 223);   // 224 pixels                     │
+│   write_reg(D_DATA_CUBE_IN_HEIGHT, 223);  // 224 pixels                     │
+│   write_reg(D_DATA_CUBE_IN_CHANNEL, 63);  // 64 channels                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 7. D_FLYING_MODE (0xA018 / 0x2806)                               [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Enable/disable DMA read (must match PDP configuration)             │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] FLYING_MODE                                                           │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = ON_FLYING  - DMA bypassed (data from SDP, ignore PDP_RDMA)          │
+│   0x1 = OFF_FLYING - DMA reads from memory                                  │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_FLYING_MODE, 0x1);  // Enable DMA read from memory            │
+│   write_reg(D_FLYING_MODE, 0x0);  // Bypass DMA (use SDP data)              │
+│   // Must match PDP D_OPERATION_MODE_CFG[4]                                 │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 8-9. D_SRC_BASE_ADDR_LOW/HIGH (0xA01C-0xA020 / 0x2807-0x2808)   [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: 64-bit source address for DMA read                                 │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   D_SRC_BASE_ADDR_LOW  [31:0] - Lower 32 bits                               │
+│   D_SRC_BASE_ADDR_HIGH [31:0] - Upper 32 bits                               │
+│                                                                              │
+│ USAGE:                                                                       │
+│   uint64_t src_addr = 0x80000000;                                           │
+│   write_reg(D_SRC_BASE_ADDR_LOW,  src_addr & 0xFFFFFFFF);                   │
+│   write_reg(D_SRC_BASE_ADDR_HIGH, src_addr >> 32);                          │
+│   // Should match PDP D_SRC_BASE_ADDR in most cases                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 10-11. D_SRC_LINE_STRIDE, D_SRC_SURFACE_STRIDE                  [READ/WRITE] │
+│        (0xA024-0xA028 / 0x2809-0x280A)                                       │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Memory layout strides for DMA read                                 │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] Stride in bytes                                                    │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_SRC_LINE_STRIDE, 224 * bytes_per_pixel);                      │
+│   write_reg(D_SRC_SURFACE_STRIDE, 224 * 224 * bytes_per_pixel);             │
+│   // Should match PDP D_SRC_* values                                        │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 12. D_SRC_RAM_CFG (0xA02C / 0x280B)                              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Source memory type for DMA read                                    │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] SRC_RAM_TYPE                                                          │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = CV - Read from CVRAM (on-chip SRAM)                                 │
+│   0x1 = MC - Read from external memory (DRAM)                               │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_SRC_RAM_CFG, 0x1);  // Read from external memory              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 13. D_DATA_FORMAT (0xA030 / 0x280C)                              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Data format for DMA read (must match PDP)                          │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [1:0] INPUT_DATA (0x0=INT8, 0x1=INT16, 0x2=FP16)                          │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DATA_FORMAT, 0x2);  // FP16 mode                              │
+│   // Must match PDP D_DATA_FORMAT                                           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 14. D_OPERATION_MODE_CFG (0xA034 / 0x280D)                       [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Split configuration for DMA read                                   │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [7:0] SPLIT_NUM (0-255, represents 1 to 256 splits)                       │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_OPERATION_MODE_CFG, 0x00);  // No split                       │
+│   write_reg(D_OPERATION_MODE_CFG, 0x03);  // 4 splits                       │
+│   // Should match PDP D_OPERATION_MODE_CFG[15:8]                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 15. D_POOLING_KERNEL_CFG (0xA038 / 0x280E)                       [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Kernel parameters for DMA address calculation                      │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [3:0]   KERNEL_WIDTH                                                      │
+│   [7:4]   KERNEL_STRIDE_WIDTH                                               │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_POOLING_KERNEL_CFG, 0x11);  // Width=2, Stride=2              │
+│   // Used by DMA to calculate fetch addresses                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 16. D_POOLING_PADDING_CFG (0xA03C / 0x280F)                      [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Padding width for DMA address calculation                          │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [3:0] PAD_WIDTH                                                           │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_POOLING_PADDING_CFG, 0x1);  // 1 pixel padding                │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 17. D_PARTIAL_WIDTH_IN (0xA040 / 0x2810)                         [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Partial width for split DMA reads                                  │
+│                                                                              │
+│ BIT LAYOUT: Same as PDP D_PARTIAL_WIDTH_IN                                  │
+│   [9:0]   PARTIAL_WIDTH_IN_FIRST                                            │
+│   [19:10] PARTIAL_WIDTH_IN_LAST                                             │
+│   [29:20] PARTIAL_WIDTH_IN_MID                                              │
+│                                                                              │
+│ USAGE: Same as PDP, defines DMA read widths per split                       │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 18. D_PERF_ENABLE (0xA044 / 0x2811)                              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Enable DMA read performance counter                                │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] DMA_EN (0x0=DISABLE, 0x1=ENABLE)                                      │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_PERF_ENABLE, 0x1);  // Enable before operation                │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 19. D_PERF_READ_STALL (0xA048 / 0x2812)                          [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Number of cycles read DMA was stalled                              │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] PERF_READ_STALL - Cycle count                                      │
+│                                                                              │
+│ USAGE:                                                                       │
+│   stall_cycles = read_reg(D_PERF_READ_STALL);                               │
+│   // High values indicate memory read bandwidth issues                      │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 20. D_CYA (0xA04C / 0x2813)                                       [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Reserved for post-silicon workarounds                              │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_CYA, 0x0);  // Typically unused                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                         COMPLETE CONFIGURATION EXAMPLE
+═══════════════════════════════════════════════════════════════════════════════
+
+SCENARIO: 2×2 Max Pooling on 224×224×64 FP16 image from external memory
+
+// ============ PDP_RDMA Configuration (if OFF_FLYING mode) ============
+write_reg(PDP_RDMA_S_POINTER, 0x0);                    // Use Group 0
+
+write_reg(PDP_RDMA_D_DATA_CUBE_IN_WIDTH, 223);        // 224 pixels
+write_reg(PDP_RDMA_D_DATA_CUBE_IN_HEIGHT, 223);       // 224 pixels
+write_reg(PDP_RDMA_D_DATA_CUBE_IN_CHANNEL, 63);       // 64 channels
+
+write_reg(PDP_RDMA_D_FLYING_MODE, 0x1);               // OFF_FLYING (DMA read)
+write_reg(PDP_RDMA_D_SRC_BASE_ADDR_LOW, 0x80000000);  // Source address
+write_reg(PDP_RDMA_D_SRC_BASE_ADDR_HIGH, 0x0);
+write_reg(PDP_RDMA_D_SRC_LINE_STRIDE, 224 * 2);       // 224 * 2 bytes (FP16)
+write_reg(PDP_RDMA_D_SRC_SURFACE_STRIDE, 224*224*2);  // Per channel
+write_reg(PDP_RDMA_D_SRC_RAM_CFG, 0x1);               // MC (external memory)
+
+write_reg(PDP_RDMA_D_DATA_FORMAT, 0x2);               // FP16
+write_reg(PDP_RDMA_D_OPERATION_MODE_CFG, 0x0);        // No split
+write_reg(PDP_RDMA_D_POOLING_KERNEL_CFG, 0x11);       // 2×2, stride 2
+write_reg(PDP_RDMA_D_POOLING_PADDING_CFG, 0x0);       // No padding
+
+write_reg(PDP_RDMA_D_OP_ENABLE, 0x1);                 // Start DMA read
+
+
+// ============ PDP Configuration ============
+write_reg(PDP_S_POINTER, 0x0);                         // Use Group 0
+
+write_reg(PDP_D_DATA_CUBE_IN_WIDTH, 223);             // 224 pixels
+write_reg(PDP_D_DATA_CUBE_IN_HEIGHT, 223);            // 224 pixels
+write_reg(PDP_D_DATA_CUBE_IN_CHANNEL, 63);            // 64 channels
+
+write_reg(PDP_D_DATA_CUBE_OUT_WIDTH, 111);            // 112 pixels
+write_reg(PDP_D_DATA_CUBE_OUT_HEIGHT, 111);           // 112 pixels
+write_reg(PDP_D_DATA_CUBE_OUT_CHANNEL, 63);           // 64 channels
+
+write_reg(PDP_D_OPERATION_MODE_CFG, 0x0011);          // MAX, OFF_FLYING
+write_reg(PDP_D_NAN_FLUSH_TO_ZERO, 0x1);              // Flush NaN to zero
+write_reg(PDP_D_POOLING_KERNEL_CFG, 0x00010101);      // 2×2, stride 2
+write_reg(PDP_D_POOLING_PADDING_CFG, 0x0000);         // No padding
+
+write_reg(PDP_D_SRC_BASE_ADDR_LOW, 0x80000000);       // Same as RDMA
+write_reg(PDP_D_SRC_BASE_ADDR_HIGH, 0x0);
+write_reg(PDP_D_SRC_LINE_STRIDE, 224 * 2);
+write_reg(PDP_D_SRC_SURFACE_STRIDE, 224 * 224 * 2);
+
+write_reg(PDP_D_DST_BASE_ADDR_LOW, 0x90000000);       // Destination
+write_reg(PDP_D_DST_BASE_ADDR_HIGH, 0x0);
+write_reg(PDP_D_DST_LINE_STRIDE, 112 * 2);
+write_reg(PDP_D_DST_SURFACE_STRIDE, 112 * 112 * 2);
+write_reg(PDP_D_DST_RAM_CFG, 0x1);                    // MC (external memory)
+
+write_reg(PDP_D_DATA_FORMAT, 0x2);                    // FP16
+
+write_reg(PDP_D_OP_ENABLE, 0x1);                      // START POOLING!
+
+// ============ Wait for completion ============
+while (read_reg(PDP_S_STATUS) & 0x3 != 0x0);          // Wait until IDLE
+
+// ============ Check results ============
+nan_count = read_reg(PDP_D_NAN_INPUT_NUM);
+printf("NaN values detected: %u\n", nan_count);
+
+═══════════════════════════════════════════════════════════════════════════════
+                                  END OF GUIDE
+═══════════════════════════════════════════════════════════════════════════════
