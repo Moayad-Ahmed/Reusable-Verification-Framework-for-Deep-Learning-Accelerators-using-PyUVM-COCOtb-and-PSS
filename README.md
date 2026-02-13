@@ -10,7 +10,7 @@ Through this approach, the project aims to establish a modern verification frame
 
 ## 🎯 Project Objectives
 
-- Develop a **reusable verification framework** for DNN accelerators
+- Develop a **reusable verification framework** for DNN accelerator
 
 - Enable **generic layer-wise verification** (Conv, ReLU, Pooling, FC)
 
