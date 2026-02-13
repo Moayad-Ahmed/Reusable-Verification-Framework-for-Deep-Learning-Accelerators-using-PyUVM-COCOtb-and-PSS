@@ -7,6 +7,8 @@ Standalone_Layers/utils/__pycache__/
 Standalone_Layers/sim_build/
 NVDLA/*.ini
 NVDLA/*.xml
+NVDLA/cdma2cbuf_data_rtl.dat
+NVDLA/cdma2cbuf_weight_rtl.dat
 NVDLA/transcript
 NVDLA/pyuvm_components/__pycache__/
 NVDLA/strategy/__pycache__/
