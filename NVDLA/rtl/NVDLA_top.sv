@@ -1,4 +1,5 @@
 // verilog_lint: waive-start explicit-parameter-storage-type
+// verilog_lint: waive-start line-length
 
 module NVDLA_top #(parameter ADDR_WIDTH = 32,
              parameter DATA_WIDTH = 64,
@@ -28,7 +29,36 @@ module NVDLA_top #(parameter ADDR_WIDTH = 32,
     input wire [31:0] nvdla_pwrbus_ram_mb_pd,
     input wire [31:0] nvdla_pwrbus_ram_p_pd,
     input wire [31:0] nvdla_pwrbus_ram_o_pd,
-    input wire [31:0] nvdla_pwrbus_ram_a_pd
+    input wire [31:0] nvdla_pwrbus_ram_a_pd,
+
+    // SECONDARY AXI INTERFACE (ext2dbb)
+    input  wire                       ext2dbb_awvalid,
+    output wire                       ext2dbb_awready,
+    input  wire [7:0]                 ext2dbb_awlen,
+    input  wire [2:0]                 ext2dbb_awsize,
+    input  wire [1:0]                 ext2dbb_awburst,
+    input  wire [ADDR_WIDTH-1:0]      ext2dbb_awaddr,
+    input  wire [7:0]                 ext2dbb_awid,
+    input  wire                       ext2dbb_wvalid,
+    output wire                       ext2dbb_wready,
+    input  wire [DATA_WIDTH-1:0]      ext2dbb_wdata,
+    input  wire                       ext2dbb_wlast,
+    input  wire [DATA_WIDTH/8-1:0]    ext2dbb_wstrb,
+    output wire                       ext2dbb_bvalid,
+    input  wire                       ext2dbb_bready,
+    output wire [7:0]                 ext2dbb_bid,
+    input  wire                       ext2dbb_arvalid,
+    output wire                       ext2dbb_arready,
+    input  wire [7:0]                 ext2dbb_arlen,
+    input  wire [2:0]                 ext2dbb_arsize,
+    input  wire [1:0]                 ext2dbb_arburst,
+    input  wire [ADDR_WIDTH-1:0]      ext2dbb_araddr,
+    input  wire [7:0]                 ext2dbb_arid,
+    output wire                       ext2dbb_rvalid,
+    input  wire                       ext2dbb_rready,
+    output wire                       ext2dbb_rlast,
+    output wire [DATA_WIDTH-1:0]      ext2dbb_rdata,
+    output wire [7:0]                 ext2dbb_rid
 );
 
 // internal signals
@@ -119,7 +149,7 @@ NV_nvdla u_dla (
   );
 
 
-dbbif_dram_model #(.ADDR_WIDTH(ADDR_WIDTH),.DATA_WIDTH(DATA_WIDTH),.MEM_SIZE(MEM_SIZE)) dram_dut (
+dbbif_dual_port_dram #(.ADDR_WIDTH(ADDR_WIDTH),.DATA_WIDTH(DATA_WIDTH),.MEM_SIZE(MEM_SIZE)) dram_dut (
       .nvdla_core2dbb_b_bid     (nvdla_core2dbb_b_bid),
       .nvdla_core2dbb_r_rid     (nvdla_core2dbb_r_rid),
       .nvdla_core2dbb_ar_arid   (nvdla_core2dbb_ar_arid),
@@ -144,10 +174,37 @@ dbbif_dram_model #(.ADDR_WIDTH(ADDR_WIDTH),.DATA_WIDTH(DATA_WIDTH),.MEM_SIZE(MEM
       .nvdla_core2dbb_aw_awready(nvdla_core2dbb_aw_awready),
       .nvdla_core2dbb_aw_awvalid(nvdla_core2dbb_aw_awvalid),
 
+      .ext2dbb_awvalid       (ext2dbb_awvalid),
+      .ext2dbb_awready       (ext2dbb_awready),
+      .ext2dbb_awlen         (ext2dbb_awlen),
+      .ext2dbb_awsize        (ext2dbb_awsize),
+      .ext2dbb_awburst       (ext2dbb_awburst),
+      .ext2dbb_awaddr        (ext2dbb_awaddr),
+      .ext2dbb_awid          (ext2dbb_awid),
+      .ext2dbb_wvalid        (ext2dbb_wvalid),
+      .ext2dbb_wready        (ext2dbb_wready),
+      .ext2dbb_wdata         (ext2dbb_wdata),
+      .ext2dbb_wlast         (ext2dbb_wlast),
+      .ext2dbb_wstrb         (ext2dbb_wstrb),
+      .ext2dbb_bvalid        (ext2dbb_bvalid),
+      .ext2dbb_bready        (ext2dbb_bready),
+      .ext2dbb_bid           (ext2dbb_bid),
+      .ext2dbb_arvalid       (ext2dbb_arvalid),
+      .ext2dbb_arready       (ext2dbb_arready),
+      .ext2dbb_arlen         (ext2dbb_arlen),
+      .ext2dbb_arsize        (ext2dbb_arsize),
+      .ext2dbb_arburst       (ext2dbb_arburst),
+      .ext2dbb_araddr        (ext2dbb_araddr),
+      .ext2dbb_arid          (ext2dbb_arid),
+      .ext2dbb_rvalid        (ext2dbb_rvalid),
+      .ext2dbb_rready        (ext2dbb_rready),
+      .ext2dbb_rlast         (ext2dbb_rlast),
+      .ext2dbb_rdata         (ext2dbb_rdata),
+      .ext2dbb_rid           (ext2dbb_rid),
+
       .clk                      (dla_core_clk),
       .rst_n                    (dla_reset_rstn)
   );
-
 
 
 endmodule

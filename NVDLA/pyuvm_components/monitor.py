@@ -18,14 +18,14 @@ class NVDLA_Monitor(uvm_monitor):
             await self.bfm.wait_for_interrupt()
 
             # Read the output surface and compute CRC
-            actual_output_data = self.bfm.read_memory(output_base_addr, output_length)
+            actual_output_data = await self.bfm.read_from_dram(output_base_addr, output_length)            
             actual_crc = self.bfm.calc_crc32(actual_output_data)
 
             # Build a result transaction and send it to the scoreboard
             if layer_name == "pooling":
                 result = PdpTransaction("pdp_result")
             else:
-                # Dummy line to avoid error, replace with actual transaction class added in the future
+                # Dummy line to avoid error -> replace with the new transaction class added in the future
                 result = PdpTransaction("generic_result")
             
             result.layer_name = layer_name

@@ -4,10 +4,12 @@ import binascii
 import cocotb
 from cocotb.queue import Queue
 from cocotb.triggers import RisingEdge, Timer
+from cocotbext.axi import AxiMaster, AxiBus
 
 from pyuvm import utility_classes
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 class NvdlaBFM(metaclass=utility_classes.Singleton):
@@ -15,9 +17,10 @@ class NvdlaBFM(metaclass=utility_classes.Singleton):
     NVDLA Bus Functional Model
 
     Provides:
-      - CSB register write / read
-      - DRAM memory load / read
       - Reset control
+      - AXI master for DRAM access
+      - DRAM memory write / read
+      - CSB register write / read
       - Interrupt wait
       - CRC-32 calculation
     """
@@ -25,11 +28,14 @@ class NvdlaBFM(metaclass=utility_classes.Singleton):
     def __init__(self):
         self.dut = cocotb.top
         self.output_config_queue = Queue(maxsize=0)
+        self.axi_master = None
 
-    
+    # ---- Reset Control ----
     async def reset(self):
         """Reset NVDLA to initialize all signals to known values"""
         dut = self.dut
+
+        logger.info("Reset asserted")
 
         # Control signals
         dut.test_mode.value = 0
@@ -53,18 +59,79 @@ class NvdlaBFM(metaclass=utility_classes.Singleton):
         dut.nvdla_pwrbus_ram_o_pd.value = 0
         dut.nvdla_pwrbus_ram_a_pd.value = 0
 
+        # ext2dbb signals
+        dut.ext2dbb_awvalid.value = 0
+        dut.ext2dbb_awlen.value = 0
+        dut.ext2dbb_awsize.value = 0
+        dut.ext2dbb_awburst.value = 0
+        dut.ext2dbb_awaddr.value = 0
+        dut.ext2dbb_awid.value = 0
+        dut.ext2dbb_wvalid.value = 0
+        dut.ext2dbb_wdata.value = 0
+        dut.ext2dbb_wlast.value = 0
+        dut.ext2dbb_wstrb.value = 0
+        dut.ext2dbb_bready.value = 1
+        dut.ext2dbb_arvalid.value = 0
+        dut.ext2dbb_arlen.value = 0
+        dut.ext2dbb_arsize.value = 0
+        dut.ext2dbb_arburst.value = 0
+        dut.ext2dbb_araddr.value = 0
+        dut.ext2dbb_arid.value = 0
+        dut.ext2dbb_rready.value = 1
+
         # Hold reset for 10000 ns
         await Timer(10000, unit="ns")
 
         dut.dla_reset_rstn.value = 1
         dut.direct_reset_.value = 1
-        logger.info("Reset released!")
+        logger.info("Reset deasserted")
 
         # Wait some time to observe stable state
         await Timer(5000, unit="ns")
 
-    # ---- CSB Write ----
-    async def csb_write(self, addr: int, data: int):
+        # Create AXI master now that clocks are running and signals are stable
+        await self.init_axi()
+
+
+    # ---- AXI master creation ----
+    async def init_axi(self):
+        """Create the AXI master after reset is established and signals are stable."""
+        if self.axi_master is None:
+            self.axi_master = AxiMaster(AxiBus.from_prefix(self.dut, "ext2dbb"), self.dut.dla_core_clk, 
+                                        self.dut.dla_reset_rstn, reset_active_level=False)
+
+    # --- DRAM Memory Access ----
+    async def write_in_dram(self, input_data_path: list, base_addr: int):
+        # Extract lines from the input file (one hex byte per line)
+        with open(input_data_path, "r") as file:
+            lines = [ln.strip() for ln in file if ln.strip()]
+
+        # Convert hex lines to byte values
+        byte_data = [int(ln, 16) for ln in lines]
+
+        # Group every 8 bytes into a little-endian qword and write to DRAM
+        num_qwords = len(byte_data) // 8
+        for i in range(num_qwords):
+            qword = 0
+            for j in range(8):
+                qword |= byte_data[i * 8 + j] << (j * 8)
+            await self.axi_master.write_qword(base_addr + i * 8, qword)
+
+        await RisingEdge(self.dut.dla_core_clk)
+
+    async def read_from_dram(self, base_addr: int, output_length: int):
+        actual_output = []
+
+        for i in range(output_length):
+            data = await self.axi_master.read_byte(base_addr + i)
+            actual_output.append(data)
+
+        await RisingEdge(self.dut.dla_core_clk)
+
+        return actual_output
+
+    # ---- Configuration Registers Write ----
+    async def reg_write(self, addr: int, data: int):
         """Non-posted CSB registers write"""
         dut = self.dut
 
@@ -87,8 +154,8 @@ class NvdlaBFM(metaclass=utility_classes.Singleton):
 
         logger.info("CSB WRITE: addr=0x%04x  data=0x%08x", addr, data)
 
-    # ---- CSB Read ----
-    async def csb_read(self, addr: int):
+    # ---- Configuration Registers Read ----
+    async def reg_read(self, addr: int):
         """CSB registers read"""
         dut = self.dut
 
@@ -108,32 +175,6 @@ class NvdlaBFM(metaclass=utility_classes.Singleton):
 
         data = int(dut.nvdla2csb_data.value)
         logger.info("CSB READ:  addr=0x%04x -> data=0x%08x", addr, data)
-        return data
-
-    # ---- DRAM Memory Access ----
-    def load_memory_from_file(self, filepath: str, base_addr: int, count: int):
-        """Load a hex-data (.dat) file into the DRAM model (like $readmemh).
-
-        The file is expected to contain one hex byte value per line.
-        """
-        with open(filepath, "r") as fh:
-            lines = [ln.strip() for ln in fh if ln.strip()]
-
-        data = [int(ln, 16) & 0xFF for ln in lines[:count]]
-        self.load_memory(base_addr, data)
-
-    def load_memory(self, base_addr: int, data: list):
-        """Write a list of byte-values into the DRAM memory array."""
-        for i, byte_val in enumerate(data):
-            self.dut.dram_dut.memory[base_addr + i].value = byte_val
-        logger.info("Loaded %d bytes to DRAM @ 0x%08x", len(data), base_addr)
-
-    def read_memory(self, base_addr: int, length: int) -> list:
-        """Read bytes from the DRAM memory array."""
-        data = []
-        for i in range(length):
-            val = int(self.dut.dram_dut.memory[base_addr + i].value)
-            data.append(val)
         return data
 
     # ----- Interrupt Handling -----

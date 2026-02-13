@@ -6,7 +6,7 @@ class PdpTransaction(uvm_sequence_item):
 
     Contains all information about a single PDP operation, including:
       - Input Data in DRAM                          (file path, base address, byte count)
-      - A list of register configurations [CSB]     [(addr, data), ...]
+      - A list of register configurations [CSB]     {(addr, data), ...}
       - Actual output address info                  (base address, byte length)
       - Actual output data info                     (actual CRC, actual output bytes)
       - Expected output data info                   (expected CRC, expected output bytes)
@@ -19,10 +19,9 @@ class PdpTransaction(uvm_sequence_item):
         # ----- Input Data (set by driver) -----
         self.input_file = None          # path to hex input-data file
         self.input_base_addr = 0        # DRAM address where input is loaded
-        self.input_byte_count = 4       # number of bytes to load
 
         # ----- Configurations (set by driver) -----
-        self.configurations = []       # [(addr, data), ...]
+        self.configurations = {}       # {(addr, data), ...}
 
         # ----- Actual Output address info (set by driver) -----
         self.output_base_addr = 0       # DRAM address of result surface
