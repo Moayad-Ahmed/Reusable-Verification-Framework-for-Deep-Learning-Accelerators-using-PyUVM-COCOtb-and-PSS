@@ -1,5 +1,8 @@
 cocotb
+cocotb-bus
+cocotbext-axi
 pyuvm
 numpy
 pyyaml
+pytest
 torch

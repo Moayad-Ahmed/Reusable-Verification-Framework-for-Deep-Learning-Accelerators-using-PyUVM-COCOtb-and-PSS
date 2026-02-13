@@ -5,3 +5,10 @@ Standalone_Layers/pyuvm_components/__pycache__/
 Standalone_Layers/strategy/__pycache__/
 Standalone_Layers/utils/__pycache__/
 Standalone_Layers/sim_build/
+NVDLA/*.ini
+NVDLA/*.xml
+NVDLA/transcript
+NVDLA/pyuvm_components/__pycache__/
+NVDLA/strategy/__pycache__/
+NVDLA/utils/__pycache__/
+NVDLA/sim_build/
