@@ -33,10 +33,10 @@ class NVDLA_Scoreboard(uvm_scoreboard):
             else:
                 self.logger.error("Expected CRC=0x%08x, data=%s", result.expected_crc, [f"0x{b:02x}" for b in result.expected_output_data])
                 self.logger.error("Actual CRC=0x%08x, data=%s", crc, [f"0x{b:02x}" for b in data])
-                self.logger.error("Actual CRC and/or data do NOT match expected values. Test FAILED.")
+                self.logger.error("Actual CRC and data do NOT match expected values. Test FAILED.")
                 failed += 1
-            
-
-        assert failed == 0, f"Test failed with {failed} failed cases"
 
         self.logger.info(f"Check phase completed: {passed} correct cases, {failed} failed cases")
+
+        assert not failed != 0, f"Test failed with {failed} failed cases"
+        assert not passed == 0, f"Test failed with no passing cases"
