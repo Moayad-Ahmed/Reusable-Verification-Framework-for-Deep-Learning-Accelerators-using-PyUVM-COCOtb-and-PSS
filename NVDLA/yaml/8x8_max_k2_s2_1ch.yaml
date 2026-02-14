@@ -1,0 +1,24 @@
+# NVDLA PDP Pooling — 8x8 MAX, kernel=2, stride=2 → 4x4 output (single channel test)
+
+test_suite:
+  - name: "NVDLA_8x8_max_k2_s2_1ch"
+    description: "8x8 single channel Max Pooling, kernel=2, stride=2 → 4x4 output"
+
+    layers:
+      - type: "pooling"
+        config:
+          kernel_size: 2
+          stride: 2
+          pool_type: "max"
+
+          input_shape: [8, 8]  # [height, width] - single channel (backward compatible)
+          data_range: [-128, 127]
+
+          padding_left: 0
+          padding_right: 0
+          padding_top: 0
+          padding_bottom: 0
+          padding_value: -128
+
+          data_format: "INT8"
+

@@ -121,3 +121,15 @@ class Pdp_6x6_MAX_k3_s1_pad2_valm64(PdpTestBase):
     YAML_FILE = "6x6_max_k3_s1_pad2_valm64.yaml"
     DAT_FILE  = "pdp_6x6_max_k3_s1_pad2_valm64_in.dat"
 
+@pyuvm.test()
+class Pdp_4x4_AVG_k3_s2_pad3(PdpTestBase):
+    """4x4 Avg Pooling, kernel=3, stride=2, pad=3, pad_value=-64 → 4x4 output"""
+    YAML_FILE = "4x4_avg_k3_s2_pad3.yaml"
+    DAT_FILE  = "pdp_4x4_avg_k3_s2_pad3_in.dat"
+
+@pyuvm.test()
+class Pdp_4x4_max_k2_s2_4ch(PdpTestBase):
+    """4x4 Max Pooling, kernel=2, stride=2, 4 channels"""
+    YAML_FILE = "4x4_max_k2_s2_4ch.yaml"
+    DAT_FILE  = "pdp_4x4_max_k2_s2_4ch_in.dat"
+

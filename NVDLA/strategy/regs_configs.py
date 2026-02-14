@@ -60,13 +60,19 @@ class RegistrationConfigs:
             layer_configs: dict with keys listed above
             src_addr: source base address in DRAM (input data)
             dst_addr: destination base address in DRAM (output data,
-                      must not overlap the input region)
+                    must not overlap the input region)
         """
         # ---------- extract config values ----------
         kernel   = layer_configs['kernel_size']
         stride   = layer_configs['stride']
         pool_type = layer_configs['pool_type']
-        in_h, in_w = layer_configs['input_shape']
+        
+        # Extract input_shape - support both [H,W] and [H,W,C] formats
+        input_shape = layer_configs['input_shape']
+        in_h = input_shape[0]
+        in_w = input_shape[1]
+        channels = input_shape[2] if len(input_shape) == 3 else 1
+        
         data_fmt = layer_configs.get('data_format', 'INT8')
 
         pad_l = layer_configs.get('padding_left', 0)
@@ -74,9 +80,6 @@ class RegistrationConfigs:
         pad_t = layer_configs.get('padding_top', 0)
         pad_b = layer_configs.get('padding_bottom', 0)
         pad_val = layer_configs.get('padding_value', 0)
-
-        # Single-channel for now
-        channels = 1
 
         bpe = _BYTES_PER_EL[data_fmt]
 

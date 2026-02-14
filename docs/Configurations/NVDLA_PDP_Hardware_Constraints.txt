@@ -1,0 +1,578 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║       NVDLA PDP HARDWARE CONSTRAINTS & VERIFICATION LIMITS REFERENCE         ║
+║       (nv_small configuration — derived from RTL analysis)                   ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+This document captures every hardware constraint, register limit, and implicit
+requirement found in the NVDLA PDP (Planar Data Processor) RTL.  Use it to
+generate ONLY valid test configurations.
+
+Document version : 1.0
+RTL source       : nv_small (NVDLA open-source, single-channel PDP)
+Last updated     : 2026-02-14
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 1.  ARCHITECTURE CONSTANTS (nv_small)
+═══════════════════════════════════════════════════════════════════════════════
+
+  ┌──────────────────────────────┬──────────┬──────────────────────────────┐
+  │ Parameter                    │ Value    │ Notes                        │
+  ├──────────────────────────────┼──────────┼──────────────────────────────┤
+  │ Memory atomic size (ATOM)    │ 8 bytes  │ Minimum AXI transfer unit    │
+  │ AXI data width               │ 64 bits  │ One atom per AXI beat        │
+  │ AXI address width            │ 32 bits  │ 4 GB address space           │
+  │ PDP throughput (INT8)        │ 1 byte/clk│ Processes 1 element/cycle   │
+  │ PDP throughput (INT16/FP16)  │ 2 byte/clk│ Same pipe, wider element   │
+  │ 1D pooling units             │ 8        │ Max reusable pipeline stages │
+  │ 2D pooling units             │ 8        │ Max vertical line buffers    │
+  │ Max kernel dimension (HW)    │ 8        │ 3-bit field + 1              │
+  │ Max stride                   │ 16       │ 4-bit field + 1              │
+  │ Max padding per side         │ 7        │ 3-bit field                  │
+  │ Max split count              │ 256      │ 8-bit field + 1              │
+  └──────────────────────────────┴──────────┴──────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 2.  TESTBENCH / DRAM CONSTRAINTS
+═══════════════════════════════════════════════════════════════════════════════
+
+  The testbench's DRAM model (dram.sv) has a finite memory array.
+
+  ┌──────────────────────────────┬──────────┬──────────────────────────────┐
+  │ Parameter                    │ Default  │ Notes                        │
+  ├──────────────────────────────┼──────────┼──────────────────────────────┤
+  │ MEM_SIZE (NVDLA_top.sv)      │ 1024 B   │ Total DRAM for both I/O      │
+  │ AXI data width               │ 64 bits  │ 8 bytes per beat             │
+  │ Input base addr              │ 0x000    │ Convention (configurable)    │
+  │ Output base addr             │ ≥ 0x100  │ Must not overlap input       │
+  └──────────────────────────────┴──────────┴──────────────────────────────┘
+
+  *** CRITICAL MEMORY CONSTRAINT ***
+  Total bytes used = input_bytes + output_bytes.
+
+  Each spatial pixel occupies ATOM-aligned storage:
+    pixel_bytes = ceil(channels × bpe / ATOM) × ATOM
+  Where bpe = 1 (INT8), 2 (INT16/FP16).
+
+  For single-channel INT8: pixel_bytes = 8 (one atom per pixel).
+
+  input_bytes  = in_H × in_W × pixel_bytes
+  output_bytes = out_H × out_W × pixel_bytes
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │ CONSTRAINT: input_bytes + output_bytes ≤ MEM_SIZE (default 1024)       │
+  │                                                                         │
+  │ Example (1-ch INT8): (in_H × in_W + out_H × out_W) × 8 ≤ 1024        │
+  │   → Total pixel count ≤ 128                                            │
+  │   → For 8×8 input (64 px): output must be ≤ 64 px → fits              │
+  │   → For 16×16 input (256 px): EXCEEDS 1024 B → increase MEM_SIZE      │
+  └─────────────────────────────────────────────────────────────────────────┘
+
+  To test larger inputs, override MEM_SIZE in NVDLA_top.sv:
+    parameter MEM_SIZE = 4096   // or 8192, etc.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 3.  REGISTER FIELD RANGES
+═══════════════════════════════════════════════════════════════════════════════
+
+  All dimension registers use "value − 1" encoding unless noted.
+
+  ┌─────────────────────────────────┬─────────┬──────────┬─────────────────┐
+  │ Register / Field                │ Bits    │ Range    │ Actual range    │
+  ├─────────────────────────────────┼─────────┼──────────┼─────────────────┤
+  │ D_DATA_CUBE_IN_WIDTH            │ [12:0]  │ 0–8191   │ 1–8192 pixels   │
+  │ D_DATA_CUBE_IN_HEIGHT           │ [12:0]  │ 0–8191   │ 1–8192 pixels   │
+  │ D_DATA_CUBE_IN_CHANNEL          │ [12:0]  │ 0–8191   │ 1–8192 channels │
+  │ D_DATA_CUBE_OUT_WIDTH           │ [12:0]  │ 0–8191   │ 1–8192 pixels   │
+  │ D_DATA_CUBE_OUT_HEIGHT          │ [12:0]  │ 0–8191   │ 1–8192 pixels   │
+  │ D_DATA_CUBE_OUT_CHANNEL         │ [12:0]  │ 0–8191   │ 1–8192 channels │
+  ├─────────────────────────────────┼─────────┼──────────┼─────────────────┤
+  │ KERNEL_WIDTH  (D_POOLING_KERNEL)│ [3:0]   │ 0–7      │ 1–8             │
+  │ KERNEL_HEIGHT (D_POOLING_KERNEL)│ [11:8]  │ 0–7      │ 1–8             │
+  │ STRIDE_WIDTH  (D_POOLING_KERNEL)│ [19:16] │ 0–15     │ 1–16            │
+  │ STRIDE_HEIGHT (D_POOLING_KERNEL)│ [23:20] │ 0–15     │ 1–16            │
+  ├─────────────────────────────────┼─────────┼──────────┼─────────────────┤
+  │ PAD_LEFT   (D_POOLING_PADDING)  │ [2:0]   │ 0–7      │ 0–7 pixels      │
+  │ PAD_TOP    (D_POOLING_PADDING)  │ [6:4]   │ 0–7      │ 0–7 pixels      │
+  │ PAD_RIGHT  (D_POOLING_PADDING)  │ [10:8]  │ 0–7      │ 0–7 pixels      │
+  │ PAD_BOTTOM (D_POOLING_PADDING)  │ [14:12] │ 0–7      │ 0–7 pixels      │
+  ├─────────────────────────────────┼─────────┼──────────┼─────────────────┤
+  │ POOLING_METHOD (D_OP_MODE_CFG)  │ [1:0]   │ 0–2      │ AVG/MAX/MIN     │
+  │ FLYING_MODE    (D_OP_MODE_CFG)  │ [4]     │ 0–1      │ ON/OFF flying   │
+  │ SPLIT_NUM      (D_OP_MODE_CFG)  │ [15:8]  │ 0–255    │ 1–256 splits    │
+  ├─────────────────────────────────┼─────────┼──────────┼─────────────────┤
+  │ DATA_FORMAT                     │ [1:0]   │ 0–2      │ INT8/INT16/FP16 │
+  │ DST_RAM_TYPE                    │ [0]     │ 0–1      │ CV(SRAM)/MC     │
+  │ SRC_RAM_TYPE (RDMA)             │ [0]     │ 0–1      │ CV(SRAM)/MC     │
+  ├─────────────────────────────────┼─────────┼──────────┼─────────────────┤
+  │ PARTIAL_WIDTH_IN_FIRST          │ [9:0]   │ 0–1023   │ 1–1024 pixels   │
+  │ PARTIAL_WIDTH_IN_LAST           │ [19:10] │ 0–1023   │ 1–1024 pixels   │
+  │ PARTIAL_WIDTH_IN_MID            │ [29:20] │ 0–1023   │ 1–1024 pixels   │
+  ├─────────────────────────────────┼─────────┼──────────┼─────────────────┤
+  │ RECIP_KERNEL_WIDTH  (AVG only)  │ [16:0]  │ 0–131071 │ Q0.16 fixed pt  │
+  │ RECIP_KERNEL_HEIGHT (AVG only)  │ [16:0]  │ 0–131071 │ Q0.16 fixed pt  │
+  ├─────────────────────────────────┼─────────┼──────────┼─────────────────┤
+  │ PAD_VALUE_1..7  (AVG only)      │ [18:0]  │ signed   │ INT8: [7:0] used│
+  │ RDMA PAD_WIDTH                  │ [3:0]   │ 0–15     │ UNUSED by HW    │
+  └─────────────────────────────────┴─────────┴──────────┴─────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 4.  CRITICAL HARDWARE CONSTRAINTS (MUST SATISFY ALL)
+═══════════════════════════════════════════════════════════════════════════════
+
+  These constraints are derived from RTL analysis. Violating ANY of them
+  produces UNDEFINED BEHAVIOR (stale data, hangs, or wrong results).
+
+  ─────────────────────────────────────────────────────────────────────────
+  C1.  PADDING MUST BE STRICTLY LESS THAN KERNEL SIZE (all sides)
+  ─────────────────────────────────────────────────────────────────────────
+
+       pad_left   < kernel_width
+       pad_right  < kernel_width
+       pad_top    < kernel_height
+       pad_bottom < kernel_height
+
+    WHY: The PDP flush logic (cal1d.v line ~865, cal2d.v line ~968) uses a
+         cascade of comparisons:
+           if (pad < stride×1) flush_num = 0
+           else if (pad < stride×2) flush_num = 1
+           ...
+         This computes floor((pad − ε) / stride) flush cycles.
+
+         When pad ≥ kernel, the output includes windows where the ENTIRE
+         kernel falls in padding. The flush logic cannot generate enough
+         bubble cycles for these all-padding windows, causing the write
+         engine to emit stale pipeline data for the missing output rows.
+
+    EXAMPLE (the bug that was found):
+        kernel=3, stride=2, pad_bottom=3 → pad_bottom ≥ kernel → INVALID
+        Hardware produced [-1, 17, -6] instead of [0, 0, 0] for last row.
+
+  ─────────────────────────────────────────────────────────────────────────
+  C2.  DIMENSIONAL ALIGNMENT (sliding window must tile perfectly)
+  ─────────────────────────────────────────────────────────────────────────
+
+       (in_W + pad_left + pad_right  − kernel_W) % stride_W == 0
+       (in_H + pad_top  + pad_bottom − kernel_H) % stride_H == 0
+
+    AND the result must give:
+
+       out_W = (in_W + pad_left + pad_right  − kernel_W) / stride_W + 1
+       out_H = (in_H + pad_top  + pad_bottom − kernel_H) / stride_H + 1
+
+    The register values for D_DATA_CUBE_OUT_WIDTH/HEIGHT must exactly
+    equal out_W−1, out_H−1. Getting this wrong causes the PDP to read
+    too few/many elements or write beyond the output buffer.
+
+  ─────────────────────────────────────────────────────────────────────────
+  C3.  PADDED DIMENSION MUST BE ≥ KERNEL SIZE
+  ─────────────────────────────────────────────────────────────────────────
+
+       in_W + pad_left + pad_right  ≥ kernel_W
+       in_H + pad_top  + pad_bottom ≥ kernel_H
+
+    Otherwise, there's not enough data for even a single pooling window.
+    The output dimension formula would give 0 or negative.
+
+  ─────────────────────────────────────────────────────────────────────────
+  C4.  OUTPUT DIMENSION ≥ 1
+  ─────────────────────────────────────────────────────────────────────────
+
+       out_W ≥ 1   AND   out_H ≥ 1
+
+    This follows from C3 + C2 but should be explicitly checked.
+
+  ─────────────────────────────────────────────────────────────────────────
+  C5.  MINIMUM INPUT SIZE
+  ─────────────────────────────────────────────────────────────────────────
+
+       in_W ≥ 1   AND   in_H ≥ 1   AND   channels ≥ 1
+
+    Register encoding: value−1 ≥ 0 → actual ≥ 1.
+
+  ─────────────────────────────────────────────────────────────────────────
+  C6.  KERNEL SIZE RANGE
+  ─────────────────────────────────────────────────────────────────────────
+
+       1 ≤ kernel_W ≤ 8
+       1 ≤ kernel_H ≤ 8
+
+    The register field is 3 bits ([2:0] used in RTL, stored in [3:0]):
+    values 0–7 map to kernel sizes 1–8.
+    NOTE: kernel_W and kernel_H are typically equal (square pooling).
+
+  ─────────────────────────────────────────────────────────────────────────
+  C7.  STRIDE RANGE
+  ─────────────────────────────────────────────────────────────────────────
+
+       1 ≤ stride_W ≤ 16
+       1 ≤ stride_H ≤ 16
+
+    The register field is 4 bits: values 0–15 map to strides 1–16.
+
+  ─────────────────────────────────────────────────────────────────────────
+  C8.  RDMA-PDP REGISTER CONSISTENCY
+  ─────────────────────────────────────────────────────────────────────────
+
+    The PDP_RDMA and PDP core must have matching configurations:
+
+       RDMA.D_DATA_CUBE_IN_WIDTH    == PDP.D_DATA_CUBE_IN_WIDTH
+       RDMA.D_DATA_CUBE_IN_HEIGHT   == PDP.D_DATA_CUBE_IN_HEIGHT
+       RDMA.D_DATA_CUBE_IN_CHANNEL  == PDP.D_DATA_CUBE_IN_CHANNEL
+       RDMA.D_DATA_FORMAT           == PDP.D_DATA_FORMAT
+       RDMA.D_FLYING_MODE           == PDP.D_OPERATION_MODE_CFG[4]
+       RDMA.D_KERNEL_WIDTH          == PDP.D_KERNEL_WIDTH (encoded)
+       RDMA.D_STRIDE_WIDTH          == PDP.D_STRIDE_WIDTH (encoded)
+       RDMA.D_OPERATION_MODE_CFG    == PDP.SPLIT_NUM
+
+  ─────────────────────────────────────────────────────────────────────────
+  C9.  MEMORY ADDRESS ALIGNMENT & NON-OVERLAP
+  ─────────────────────────────────────────────────────────────────────────
+
+    Source and destination base addresses should be aligned to ATOM (8 B).
+    The output region must NOT overlap the input region.
+
+       dst_base_addr ≥ src_base_addr + (in_H × in_W × pixel_bytes)
+
+    Line stride and surface stride must be consistent with dimensions:
+       src_line_stride    = in_W  × pixel_bytes
+       src_surface_stride = src_line_stride × in_H
+       dst_line_stride    = out_W × pixel_bytes
+       dst_surface_stride = dst_line_stride × out_H
+
+  ─────────────────────────────────────────────────────────────────────────
+  C10. RECIPROCAL VALUES (AVG pooling only)
+  ─────────────────────────────────────────────────────────────────────────
+
+    For average pooling, the reciprocal registers must be programmed:
+
+       RECIP_KERNEL_WIDTH  = round(65536 / kernel_W)
+       RECIP_KERNEL_HEIGHT = round(65536 / kernel_H)
+
+    Standard lookup table:
+       kernel=1 → 0x10000 (65536)
+       kernel=2 → 0x08000 (32768)
+       kernel=3 → 0x05555 (21845)
+       kernel=4 → 0x04000 (16384)
+       kernel=5 → 0x03333 (13107)
+       kernel=6 → 0x02AAA (10922)
+       kernel=7 → 0x02492 ( 9362)
+       kernel=8 → 0x02000 ( 8192)
+
+    For MAX/MIN pooling, these registers are ignored but should still be set.
+
+  ─────────────────────────────────────────────────────────────────────────
+  C11. OPERATION ENABLE SEQUENCE
+  ─────────────────────────────────────────────────────────────────────────
+
+    1. Poll PDP_RDMA S_STATUS and PDP S_STATUS until both show IDLE (0x0).
+    2. Write S_POINTER for both (group selection, typically 0x0).
+    3. Program ALL configuration registers for RDMA, then PDP.
+    4. Write PDP_RDMA D_OP_ENABLE = 1 FIRST.
+    5. Write PDP     D_OP_ENABLE = 1 SECOND.
+
+    Reversing step 4 and 5 causes the PDP core to start before data
+    is available from the DMA engine → undefined behavior.
+
+  ─────────────────────────────────────────────────────────────────────────
+  C12. OUTPUT CHANNELS = INPUT CHANNELS
+  ─────────────────────────────────────────────────────────────────────────
+
+    Pooling does not change the channel count:
+
+       D_DATA_CUBE_OUT_CHANNEL == D_DATA_CUBE_IN_CHANNEL
+
+  ─────────────────────────────────────────────────────────────────────────
+  C13. SPLIT MODE PARTIAL WIDTH CONSTRAINTS
+  ─────────────────────────────────────────────────────────────────────────
+
+    When split_num = 0 (no split, normal operation):
+       PDP.D_PARTIAL_WIDTH_IN   → FIRST = (in_W − 1), MID = 0, LAST = 0
+       PDP.D_PARTIAL_WIDTH_OUT  → FIRST = (out_W − 1), MID = 0, LAST = 0
+       RDMA.D_PARTIAL_WIDTH_IN  → FIRST = (in_W − 1), MID = 0, LAST = 0
+
+    IMPORTANT: Partial widths use the RAW (unpadded) input width.
+    The PDP core adds padding internally. Do NOT include padding in
+    the partial width register values.
+
+    When split_num > 0:
+       Sum of all split widths = total input width
+       Each split's partial_width must be ≥ kernel_size (for FIRST/MID)
+
+  ─────────────────────────────────────────────────────────────────────────
+  C14. PADDING VALUE REGISTERS (AVG pooling only)
+  ─────────────────────────────────────────────────────────────────────────
+
+    For AVG pooling: typically set all D_POOLING_PADDING_VALUE_1..7 = 0.
+    (Pad value contributes to the average computation.)
+
+    For MAX pooling: padding values are IGNORED by hardware; the PDP core
+    uses its own internal behavior for border windows.
+
+    For MIN pooling: padding values are IGNORED by hardware.
+
+  ─────────────────────────────────────────────────────────────────────────
+  C15. RDMA PAD_WIDTH REGISTER (UNUSED)
+  ─────────────────────────────────────────────────────────────────────────
+
+    The PDP_RDMA D_POOLING_PADDING_CFG [3:0] (pad_width) is declared in
+    the register block but is a DANGLING WIRE — it is not connected to
+    any logic in the RDMA ingress or egress modules.
+
+    It can be set to any value without effect, but for cleanliness:
+       RDMA.D_POOLING_PADDING_CFG = pad_left (or 0)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 5.  PRACTICAL VERIFICATION TEST SPACE
+═══════════════════════════════════════════════════════════════════════════════
+
+  Given the 1024-byte DRAM model and single-channel INT8 (pixel_bytes=8):
+
+  ┌──────────────────────────┬──────────┬───────────┬─────────────────────┐
+  │ Input Shape              │ Max out  │ Total mem │ Status              │
+  ├──────────────────────────┼──────────┼───────────┼─────────────────────┤
+  │ 1×1  (1 px)              │ 1×1      │ 16 B      │ ✓ (min test)       │
+  │ 2×2  (4 px)              │ varies   │ ~64 B     │ ✓                  │
+  │ 3×3  (9 px)              │ varies   │ ~128 B    │ ✓                  │
+  │ 4×4  (16 px)             │ varies   │ ~192 B    │ ✓                  │
+  │ 5×5  (25 px)             │ varies   │ ~256 B    │ ✓                  │
+  │ 6×6  (36 px)             │ varies   │ ~384 B    │ ✓                  │
+  │ 8×8  (64 px)             │ varies   │ ~640 B    │ ✓                  │
+  │ 10×10 (100 px)           │ varies   │ ~960 B    │ ✓ (tight)          │
+  │ 11×11 (121 px)           │ varies   │ ~1024 B   │ ⚠ barely fits      │
+  │ 12×12+ (144+ px)         │ varies   │ >1024 B   │ ✗ increase MEM_SIZE│
+  └──────────────────────────┴──────────┴───────────┴─────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 6.  VALID CONFIGURATION EXAMPLES
+═══════════════════════════════════════════════════════════════════════════════
+
+  All examples: single channel, INT8, no split.
+
+  ┌────┬─────────┬────┬────┬──────────────────┬───────┬───────────────────┐
+  │ #  │ Input   │ K  │ S  │ Padding (L,R,T,B)│ Output│ Notes             │
+  ├────┼─────────┼────┼────┼──────────────────┼───────┼───────────────────┤
+  │ 1  │ 4×4     │ 2  │ 2  │ 0,0,0,0          │ 2×2   │ Basic, no pad     │
+  │ 2  │ 4×4     │ 3  │ 1  │ 1,1,1,1          │ 4×4   │ Same-size pooling │
+  │ 3  │ 4×4     │ 2  │ 1  │ 0,1,0,1          │ 4×4   │ Asymmetric pad    │
+  │ 4  │ 6×6     │ 3  │ 3  │ 0,0,0,0          │ 2×2   │ Non-overlapping   │
+  │ 5  │ 6×6     │ 2  │ 2  │ 0,0,0,0          │ 3×3   │ Standard 2×2 pool │
+  │ 6  │ 8×8     │ 2  │ 2  │ 0,0,0,0          │ 4×4   │ Larger input      │
+  │ 7  │ 8×8     │ 4  │ 4  │ 0,0,0,0          │ 2×2   │ Big kernel        │
+  │ 8  │ 8×8     │ 3  │ 1  │ 1,1,1,1          │ 8×8   │ Overlapping + pad │
+  │ 9  │ 5×5     │ 3  │ 1  │ 1,1,1,1          │ 5×5   │ Odd input size    │
+  │ 10 │ 4×4     │ 4  │ 1  │ 0,0,0,0          │ 1×1   │ Global pooling    │
+  │ 11 │ 4×4     │ 3  │ 2  │ 1,2,1,2          │ 3×3   │ Mixed asymmetric  │
+  │ 12 │ 6×6     │ 3  │ 1  │ 0,2,0,2          │ 6×6   │ Right+bottom pad  │
+  │ 13 │ 8×8     │ 8  │ 8  │ 0,0,0,0          │ 1×1   │ Max kernel/stride │
+  │ 14 │ 3×3     │ 2  │ 1  │ 0,0,0,0          │ 2×2   │ Small input       │
+  │ 15 │ 1×1     │ 1  │ 1  │ 0,0,0,0          │ 1×1   │ Minimum case      │
+  └────┼─────────┼────┼────┼──────────────────┼───────┼───────────────────┘
+
+  *** INVALID CONFIGURATIONS (DO NOT TEST) ***
+
+  ┌────┬─────────┬────┬────┬──────────────────┬──────────────────────────┐
+  │ #  │ Input   │ K  │ S  │ Padding (L,R,T,B)│ Violation                │
+  ├────┼─────────┼────┼────┼──────────────────┼──────────────────────────┤
+  │ X1 │ 4×4     │ 3  │ 2  │ 1,2,2,3          │ pad_bottom(3) ≥ kernel(3)│
+  │ X2 │ 4×4     │ 2  │ 2  │ 0,3,0,0          │ pad_right(3) ≥ kernel(2) │
+  │ X3 │ 4×4     │ 3  │ 2  │ 0,0,0,0          │ (4−3)%2=1 ≠ 0           │
+  │ X4 │ 2×2     │ 3  │ 1  │ 0,0,0,0          │ padded_dim(2) < kernel(3)│
+  │ X5 │ 4×4     │ 2  │ 3  │ 0,0,0,0          │ (4−2)%3=2 ≠ 0           │
+  │ X6 │ 4×4     │ 9  │ 1  │ 0,0,0,0          │ kernel(9) > max(8)       │
+  └────┼─────────┼────┼────┼──────────────────┼──────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 7.  POOLING METHOD SPECIFIC BEHAVIOR
+═══════════════════════════════════════════════════════════════════════════════
+
+  ┌──────────┬───────────────────────────────────────────────────────────────┐
+  │ AVG      │ • Reciprocal registers MUST be programmed                    │
+  │          │ • Padding value registers are USED in computation            │
+  │          │ • HW uses two-stage fixed-point multiply + round:            │
+  │          │     step1 = hw_round(sum × recip_width)                      │
+  │          │     step2 = hw_round(step1 × recip_height)                   │
+  │          │ • Rounding: round-half-away-from-zero (both stages)          │
+  │          │ • Result clipped to INT8 range [-128, 127]                   │
+  ├──────────┼───────────────────────────────────────────────────────────────┤
+  │ MAX      │ • Reciprocal registers IGNORED (but write anyway)            │
+  │          │ • Padding value registers IGNORED                            │
+  │          │ • For border windows with padding, HW uses internal          │
+  │          │   comparison logic — pad positions don't participate          │
+  │          │   in the max. Equivalent to padding_value = −128 (INT8_MIN). │
+  │          │ • Golden model should use pad_value = −128 for MAX           │
+  ├──────────┼───────────────────────────────────────────────────────────────┤
+  │ MIN      │ • Reciprocal registers IGNORED (but write anyway)            │
+  │          │ • Padding value registers IGNORED                            │
+  │          │ • For border windows, HW equivalent: pad_value = +127        │
+  │          │   (INT8_MAX). Golden model should use pad_value = 127.       │
+  └──────────┴───────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 8.  DATA TYPE SPECIFIC CONSTRAINTS
+═══════════════════════════════════════════════════════════════════════════════
+
+  ┌──────────┬───────────────────────────────────────────────────────────────┐
+  │ INT8     │ • 1 byte/element, signed range: [−128, +127]                 │
+  │          │ • pixel_bytes = 8 (ATOM-aligned)                             │
+  │          │ • D_DATA_FORMAT = 0x0                                        │
+  │          │ • Padding value: [7:0] of D_POOLING_PADDING_VALUE_x          │
+  ├──────────┼───────────────────────────────────────────────────────────────┤
+  │ INT16    │ • 2 bytes/element, signed range: [−32768, +32767]            │
+  │          │ • pixel_bytes = 8 (still 1 atom for single channel)          │
+  │          │ • D_DATA_FORMAT = 0x1                                        │
+  │          │ • Padding value: [15:0] of D_POOLING_PADDING_VALUE_x         │
+  ├──────────┼───────────────────────────────────────────────────────────────┤
+  │ FP16     │ • 2 bytes/element, IEEE 754 half-precision                   │
+  │          │ • pixel_bytes = 8 (still 1 atom for single channel)          │
+  │          │ • D_DATA_FORMAT = 0x2                                        │
+  │          │ • D_NAN_FLUSH_TO_ZERO available (set to 1 to flush NaN)      │
+  │          │ • Reciprocals use FP17 format for AVG mode                   │
+  └──────────┴───────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 9.  CONSTRAINT VALIDATION FORMULAS (for test generation)
+═══════════════════════════════════════════════════════════════════════════════
+
+  Given user inputs: in_H, in_W, kernel, stride, pad_L, pad_R, pad_T, pad_B
+
+  ---- Step 1: Check register field limits ----
+  assert 1 ≤ in_W ≤ 8192
+  assert 1 ≤ in_H ≤ 8192
+  assert 1 ≤ kernel ≤ 8           (if square; kernel_W and kernel_H separately)
+  assert 1 ≤ stride ≤ 16          (if square; stride_W and stride_H separately)
+  assert 0 ≤ pad_L ≤ 7
+  assert 0 ≤ pad_R ≤ 7
+  assert 0 ≤ pad_T ≤ 7
+  assert 0 ≤ pad_B ≤ 7
+
+  ---- Step 2: Padding < kernel (each side) ----
+  assert pad_L < kernel_W
+  assert pad_R < kernel_W
+  assert pad_T < kernel_H
+  assert pad_B < kernel_H
+
+  ---- Step 3: Minimum padded size ----
+  padded_W = in_W + pad_L + pad_R
+  padded_H = in_H + pad_T + pad_B
+  assert padded_W ≥ kernel_W
+  assert padded_H ≥ kernel_H
+
+  ---- Step 4: Dimensional alignment ----
+  assert (padded_W − kernel_W) % stride_W == 0
+  assert (padded_H − kernel_H) % stride_H == 0
+
+  ---- Step 5: Compute output dimensions ----
+  out_W = (padded_W − kernel_W) / stride_W + 1
+  out_H = (padded_H − kernel_H) / stride_H + 1
+  assert out_W ≥ 1
+  assert out_H ≥ 1
+
+  ---- Step 6: Memory capacity check ----
+  pixel_bytes = 8   (for single-channel INT8)
+  total_memory = (in_W × in_H + out_W × out_H) × pixel_bytes
+  assert total_memory ≤ MEM_SIZE
+
+  ---- Step 7: Address layout ----
+  input_bytes = in_W × in_H × pixel_bytes
+  dst_addr = max(0x100, ceil(input_bytes / 256) × 256)
+  assert dst_addr + (out_W × out_H × pixel_bytes) ≤ MEM_SIZE
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 10. FLUSH LOGIC DEEP-DIVE (for understanding edge cases)
+═══════════════════════════════════════════════════════════════════════════════
+
+  The PDP CORE uses identical flush logic in both horizontal (cal1d) and
+  vertical (cal2d) directions. After all real data is consumed, the
+  engine generates "bubble" (flush) cycles for the padding region.
+
+  flush_num_cal is computed as:
+    if   pad < stride×1  → 0 flush cycles
+    elif pad < stride×2  → 1 flush cycle
+    elif pad < stride×3  → 2 flush cycles
+    ...
+    elif pad < stride×7  → 6 flush cycles
+    else                 → 7 flush cycles (maximum)
+
+  This means:
+    • pad = 0            → 0 flushes (no padding region to process)
+    • 0 < pad < stride   → 0 flushes (padding fits in last real window)
+    • stride ≤ pad < 2S  → 1 flush   (one extra output row/col)
+    • 2S ≤ pad < 3S      → 2 flushes (two extra output rows/cols)
+    • ...
+
+  Since pad is at most 7 and stride can be up to 16:
+    • With stride ≥ 8: pad < stride always → flush_num = 0
+    • With stride = 1: flush_num = pad (up to 7)
+
+  The maximum number of flush cycles is 7 (3-bit counter).
+  This means pad / stride should produce at most 7 extra outputs.
+
+  With the constraint pad < kernel ≤ 8 and stride ≥ 1, the maximum
+  practical flush count is well within the 7-cycle limit.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 11. KERNEL/STRIDE/PADDING VALID COMBINATIONS LOOKUP TABLE
+═══════════════════════════════════════════════════════════════════════════════
+
+  For convenience, here are all valid (kernel, stride) pairs that produce
+  integer output for common small input sizes WITH NO PADDING:
+
+  ┌────────┬───────────────────────────────────────────────────────────────┐
+  │ Input  │ Valid (kernel, stride) → output_dim                          │
+  ├────────┼───────────────────────────────────────────────────────────────┤
+  │ 1×1    │ (1,1)→1                                                      │
+  │ 2×2    │ (1,1)→2  (2,1)→1  (2,2)→1                                   │
+  │ 3×3    │ (1,1)→3  (2,1)→2  (3,1)→1  (3,3)→1                         │
+  │ 4×4    │ (1,1)→4  (2,1)→3  (2,2)→2  (3,1)→2  (4,1)→1  (4,2)→1      │
+  │        │ (4,4)→1                                                      │
+  │ 5×5    │ (1,1)→5  (2,1)→4  (3,1)→3  (3,2)→2  (5,1)→1  (5,5)→1      │
+  │ 6×6    │ (1,1)→6  (2,1)→5  (2,2)→3  (3,1)→4  (3,3)→2  (4,1)→3      │
+  │        │ (6,1)→1  (6,2)→1  (6,3)→1  (6,6)→1                         │
+  │ 7×7    │ (1,1)→7  (2,1)→6  (3,1)→5  (3,2)→3  (4,1)→4  (7,1)→1      │
+  │        │ (7,7)→1                                                      │
+  │ 8×8    │ (1,1)→8  (2,1)→7  (2,2)→4  (3,1)→6  (4,1)→5  (4,2)→3      │
+  │        │ (4,4)→2  (8,1)→1  (8,2)→1  (8,4)→1  (8,8)→1                │
+  └────────┴───────────────────────────────────────────────────────────────┘
+
+  For configurations WITH PADDING, use the formula from Section 9.
+  Remember: each pad value must be < kernel size.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 12. SUMMARY OF ALL CONSTRAINTS (QUICK CHECKLIST)
+═══════════════════════════════════════════════════════════════════════════════
+
+  □ 1 ≤ kernel_W, kernel_H ≤ 8
+  □ 1 ≤ stride_W, stride_H ≤ 16
+  □ 0 ≤ pad_L, pad_R < kernel_W   AND   pad_L, pad_R ≤ 7
+  □ 0 ≤ pad_T, pad_B < kernel_H   AND   pad_T, pad_B ≤ 7
+  □ 1 ≤ in_W, in_H ≤ 8192
+  □ in_W + pad_L + pad_R ≥ kernel_W
+  □ in_H + pad_T + pad_B ≥ kernel_H
+  □ (in_W + pad_L + pad_R − kernel_W) % stride_W == 0
+  □ (in_H + pad_T + pad_B − kernel_H) % stride_H == 0
+  □ out_W ≥ 1   AND   out_H ≥ 1
+  □ out_channels == in_channels
+  □ Total memory (input + output) ≤ DRAM MEM_SIZE
+  □ Output region does not overlap input region
+  □ RDMA registers match PDP registers
+  □ RDMA D_OP_ENABLE written BEFORE PDP D_OP_ENABLE
+  □ AVG: reciprocal registers correctly programmed
+  □ Partial widths use UNPADDED input width (non-split mode)
+  □ pool_type ∈ {avg, max, min}
+  □ data_format ∈ {INT8, INT16, FP16}
+
+═══════════════════════════════════════════════════════════════════════════════
+                              END OF DOCUMENT
+═══════════════════════════════════════════════════════════════════════════════

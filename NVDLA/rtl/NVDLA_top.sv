@@ -3,7 +3,7 @@
 
 module NVDLA_top #(parameter ADDR_WIDTH = 32,
              parameter DATA_WIDTH = 64,
-             parameter MEM_SIZE = 1024
+             parameter MEM_SIZE = 4096  // Increased from 1024 to support larger tests (e.g., 10x10+)
 ) (
     input wire dla_core_clk,
     input wire dla_csb_clk,

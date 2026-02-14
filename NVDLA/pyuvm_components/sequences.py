@@ -42,27 +42,54 @@ class PdpTestSequence(uvm_sequence):
         """
         Write input data to .dat file in NVDLA atom-aligned format.
 
-        Each spatial pixel is padded to atom boundaries so that
-        write_in_dram() can map every ATOM lines to one 64-bit AXI write.
+        For multi-channel data, NVDLA packs all channels of a spatial position
+        into one atom (when channels*bpe <= ATOM), then pads to atom boundary.
+        Memory layout: for each (h, w): write all C channels, then pad.
 
         Args:
-            input_bytes: List of signed integer values (row-major)
+            input_bytes: Flattened list in channel-first order (C, H, W)
             config: Configuration dictionary (data_format, input_shape)
         """
         bpe, pixel_bytes = self.compute_pixel_layout(config)
+        input_shape = config['input_shape']
+        channels = input_shape[2] if len(input_shape) == 3 else 1
+        
+        if len(input_shape) == 3:
+            h, w, c = input_shape
+        else:
+            h, w = input_shape
+            c = 1
 
         if self.input_file:
             with open(self.input_file, 'w') as f:
-                for byte_val in input_bytes:
-                    # Write the actual data byte(s)
-                    value_bytes = byte_val.to_bytes(
-                        bpe, byteorder='little', signed=True
-                    )
-                    for b in value_bytes:
-                        f.write(f"{b:02x}\n")
-                    # Pad the rest of the atom to pixel_bytes
-                    for _ in range(pixel_bytes - bpe):
-                        f.write("00\n")
+                # Data is in CHW order (channel-first), but memory needs HWC per-pixel layout
+                # Reshape input_bytes from flat CHW to (C, H, W)
+                if c == 1:
+                    data_array = np.array(input_bytes).reshape((h, w))
+                else:
+                    data_array = np.array(input_bytes).reshape((c, h, w))
+                
+                # Write in HW order, with all channels per pixel
+                for row in range(h):
+                    for col in range(w):
+                        # Write all channels for this spatial position
+                        if c == 1:
+                            pixel_data = [data_array[row, col]]
+                        else:
+                            pixel_data = [data_array[ch, row, col] for ch in range(c)]
+                        
+                        # Write each channel's bytes
+                        for val in pixel_data:
+                            value_bytes = int(val).to_bytes(
+                                bpe, byteorder='little', signed=True
+                            )
+                            for b in value_bytes:
+                                f.write(f"{b:02x}\n")
+                        
+                        # Pad the rest of the atom to pixel_bytes
+                        bytes_written = c * bpe
+                        for _ in range(pixel_bytes - bytes_written):
+                            f.write("00\n")
 
     def load_yaml_config(self):
         """Load and parse the YAML configuration file"""
@@ -100,9 +127,23 @@ class PdpTestSequence(uvm_sequence):
             # Compute generic golden output, then adapt for NVDLA hardware
             generic_output = strategy.compute_golden(input_data, config)
             expected_output = strategy.nvdla_avg_adjust(input_data, config)
-            # Flatten to 1D byte array
+            
+            # Flatten to 1D byte array - convert from CHW (model format) to HWC (NVDLA memory layout)
             input_bytes = input_data.flatten().astype(np.int8).tolist()
-            expected_bytes = expected_output.flatten().astype(np.int8).tolist()
+            
+            # Convert expected output from CHW to HWC memory layout (pixel-by-pixel with all channels)
+            input_shape = config['input_shape']
+            is_multi_channel = len(input_shape) == 3 and input_shape[2] > 1
+            
+            if is_multi_channel and expected_output.ndim == 3:
+                # Expected output is (C, H, W), need to convert to HWC memory layout
+                c, h, w = expected_output.shape
+                # Transpose from (C, H, W) to (H, W, C) then flatten
+                expected_hwc = np.transpose(expected_output, (1, 2, 0))  # Now (H, W, C)
+                expected_bytes = expected_hwc.flatten().astype(np.int8).tolist()
+            else:
+                # Single channel: keep as-is
+                expected_bytes = expected_output.flatten().astype(np.int8).tolist()
 
             # Debug prints
             print(f"\n=== Iteration {i} ===")
@@ -114,7 +155,9 @@ class PdpTestSequence(uvm_sequence):
 
             # ----- Atom-aligned layout -----
             _, pixel_bytes = self.compute_pixel_layout(config)
-            input_total_bytes = len(input_bytes) * pixel_bytes
+            input_shape = config['input_shape']
+            num_spatial_pixels = input_shape[0] * input_shape[1]  # H × W
+            input_total_bytes = num_spatial_pixels * pixel_bytes
 
             # ----- Input DRAM data -----
             seq_item.input_file = self.input_file
@@ -130,8 +173,15 @@ class PdpTestSequence(uvm_sequence):
 
             # ----- Expected output info (from golden model) -----
             bpe, pixel_bytes = self.compute_pixel_layout(config)
-            channels = config.get('channels', 1)
-            out_h, out_w = expected_output.shape
+            input_shape = config['input_shape']
+            channels = input_shape[2] if len(input_shape) == 3 else 1
+            
+            # Handle both 2D (H, W) and 3D (C, H, W) output shapes
+            if expected_output.ndim == 2:
+                out_h, out_w = expected_output.shape
+            else:
+                _, out_h, out_w = expected_output.shape  # (C, H, W)
+            
             seq_item.output_num_pixels = out_h * out_w
             seq_item.output_pixel_bytes = pixel_bytes
             seq_item.output_data_bytes_per_pixel = channels * bpe
@@ -144,6 +194,3 @@ class PdpTestSequence(uvm_sequence):
 
             await bfm.iteration_done_queue.get()
             print(f"Iteration {i} checked by scoreboard.")
-
-
-            
