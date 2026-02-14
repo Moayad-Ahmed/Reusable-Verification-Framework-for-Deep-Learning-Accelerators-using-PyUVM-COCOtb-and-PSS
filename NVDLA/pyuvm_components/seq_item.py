@@ -26,7 +26,9 @@ class PdpTransaction(uvm_sequence_item):
         self.reg_configs = []       # [(addr, data), ...]
         # ----- Actual Output address info (set by driver) -----
         self.output_base_addr = 0       # DRAM address of result surface
-        self.output_length = 0          # bytes to read / CRC
+        self.output_num_pixels = 0      # number of spatial output pixels
+        self.output_pixel_bytes = 8     # total bytes per pixel in DRAM (atom-aligned)
+        self.output_data_bytes_per_pixel = 1  # real data bytes per pixel (channels × bpe)
         # ----- Actual and expected output data (filled by monitor) -----
         self.actual_output_data = None
         self.expected_output_data = None

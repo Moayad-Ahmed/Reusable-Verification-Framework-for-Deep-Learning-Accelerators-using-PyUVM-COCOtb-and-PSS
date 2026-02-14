@@ -18,7 +18,12 @@ class NVDLA_Monitor(uvm_monitor):
             await self.bfm.wait_for_interrupt()
 
             # Read the output surface and compute CRC
-            actual_output_data = await self.bfm.read_from_dram(recieved_seq_item.output_base_addr, recieved_seq_item.output_length)            
+            actual_output_data = await self.bfm.read_from_dram(
+                recieved_seq_item.output_base_addr,
+                recieved_seq_item.output_num_pixels,
+                pixel_bytes=recieved_seq_item.output_pixel_bytes,
+                data_bytes_per_pixel=recieved_seq_item.output_data_bytes_per_pixel
+            )
 
             recieved_seq_item.actual_output_data = actual_output_data
 

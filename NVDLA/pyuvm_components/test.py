@@ -21,9 +21,16 @@ def config_file_path(filename):
     return os.path.join(CONFIG_DIR, filename)
 
 
-@pyuvm.test()
-class PdpBasicTest(uvm_test):
-    """Runs the pdp_1x1x1_3x3_ave_int8_0 test through NVDLA PDP"""
+# ------------------------------------------------------------------ #
+#  Base class — common clock setup, env, objection logic             #
+# ------------------------------------------------------------------ #
+
+class PdpTestBase(uvm_test):
+    """Base class for all PDP pooling tests."""
+
+    # Subclasses override these two class attributes
+    YAML_FILE = None        # e.g. "4x4_max_k2_s2.yaml"
+    DAT_FILE  = None        # e.g. "4x4_max_k2_s2_in.dat"
 
     def build_phase(self):
         self.env = NVDLA_Env("NVDLA_Env", self)
@@ -32,7 +39,6 @@ class PdpBasicTest(uvm_test):
         self.sqr = ConfigDB().get(None, "", "SEQR")
 
     async def run_phase(self):
-        # Start both clocks (20 ns period = 50 MHz clock)
         cocotb.start_soon(
             Clock(cocotb.top.dla_core_clk, 20, unit="ns").start()
         )
@@ -42,19 +48,76 @@ class PdpBasicTest(uvm_test):
 
         pdp_test = PdpTestSequence(
             "pdp_test",
-            input_file=input_file_path("pdp_1x1x1_3x3_ave_int8_0_in.dat"),
-            config_file=config_file_path("nvdla_pooling_config.yaml")
+            input_file=input_file_path(self.DAT_FILE),
+            config_file=config_file_path(self.YAML_FILE),
         )
 
         self.raise_objection()
-
         await pdp_test.start(self.sqr)
 
-        # Wait for NVDLA interrupt to fire
         while cocotb.top.dla_intr.value != 1:
             await RisingEdge(cocotb.top.dla_core_clk)
 
-        # Wait some extra cycles to ensure that the scoreboard has completed its checks
         await ClockCycles(cocotb.top.dla_core_clk, 1000)
-
         self.drop_objection()
+
+
+# ------------------------------------------------------------------ #
+#  Concrete test classes — one per YAML configuration                #
+# ------------------------------------------------------------------ #
+
+@pyuvm.test()
+class PdpBasicTest(PdpTestBase):
+    """Default test — uses nvdla_pooling_config.yaml"""
+    YAML_FILE = "nvdla_pooling_config.yaml"
+    DAT_FILE  = "pdp_default_in.dat"
+
+
+@pyuvm.test()
+class Pdp_4x4_MAX_k2_s2(PdpTestBase):
+    """4x4 Max Pooling, kernel=2, stride=2 → 2x2 output"""
+    YAML_FILE = "4x4_max_k2_s2.yaml"
+    DAT_FILE  = "pdp_4x4_max_k2_s2_in.dat"
+
+
+@pyuvm.test()
+class Pdp_6x6_AVG_k2_s2(PdpTestBase):
+    """6x6 Avg Pooling, kernel=2, stride=2 → 3x3 output"""
+    YAML_FILE = "6x6_avg_k2_s2.yaml"
+    DAT_FILE  = "pdp_6x6_avg_k2_s2_in.dat"
+
+
+@pyuvm.test()
+class Pdp_4x4_MIN_k2_s1(PdpTestBase):
+    """4x4 Min Pooling, kernel=2, stride=1 → 3x3 output"""
+    YAML_FILE = "4x4_min_k2_s1.yaml"
+    DAT_FILE  = "pdp_4x4_min_k2_s1_in.dat"
+
+
+@pyuvm.test()
+class Pdp_8x8_MAX_k4_s4(PdpTestBase):
+    """8x8 Max Pooling, kernel=4, stride=4 → 2x2 output"""
+    YAML_FILE = "8x8_max_k4_s4.yaml"
+    DAT_FILE  = "pdp_8x8_max_k4_s4_in.dat"
+
+
+@pyuvm.test()
+class Pdp_8x8_AVG_k2_s2(PdpTestBase):
+    """8x8 Avg Pooling, kernel=2, stride=2 → 4x4 output"""
+    YAML_FILE = "8x8_avg_k2_s2.yaml"
+    DAT_FILE  = "pdp_8x8_avg_k2_s2_in.dat"
+
+
+@pyuvm.test()
+class Pdp_5x5_MAX_k3_s1_pad1(PdpTestBase):
+    """5x5 Max Pooling, kernel=3, stride=1, pad=1 → 5x5 output"""
+    YAML_FILE = "5x5_max_k3_s1_pad1.yaml"
+    DAT_FILE  = "pdp_5x5_max_k3_s1_pad1_in.dat"
+
+
+@pyuvm.test()
+class Pdp_6x6_MAX_k3_s1_pad2_valm64(PdpTestBase):
+    """6x6 Max Pooling, kernel=3, stride=1, pad=2, pad_value=-64 → 8x8 output"""
+    YAML_FILE = "6x6_max_k3_s1_pad2_valm64.yaml"
+    DAT_FILE  = "pdp_6x6_max_k3_s1_pad2_valm64_in.dat"
+
