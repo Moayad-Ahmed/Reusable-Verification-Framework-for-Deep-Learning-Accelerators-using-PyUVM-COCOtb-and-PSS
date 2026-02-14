@@ -3,6 +3,10 @@ COCOTB_REDUCED_LOG_FMT = True
 SIM ?= questa-compat
 TOPLEVEL_LANG ?= verilog
 
+# Convert MSYS2/Git-Bash paths (/d/...) to Windows paths (D:/...)
+# Note: cocotb overrides OS to "Msys", so we cannot rely on ifeq ($(OS),Windows_NT)
+WPWD := $(shell pwd -W 2>/dev/null || pwd)
+
 # Add questa installation path to PATH
 ifeq ($(SIM),questa-compat)
 ifndef QUESTA_HOME
@@ -13,26 +17,26 @@ export PATH := $(QUESTA_HOME):$(PATH)
 endif
 
 # Add Python source directories to PYTHONPATH (use ; separator for Windows)
-export PYTHONPATH := $(PWD)/pyuvm_components;$(PYTHONPATH)
+export PYTHONPATH := $(WPWD)/pyuvm_components;$(PYTHONPATH)
 
 # Adding Verilog sources
-VERILOG_INCLUDE_DIRS += $(PWD)/rtl
-VERILOG_INCLUDE_DIRS += $(PWD)/rtl/vmod/include
-VERILOG_INCLUDE_DIRS += $(PWD)/rtl/vmod/vlibs
-VERILOG_INCLUDE_DIRS += $(PWD)/rtl/vmod/rams/model
-VERILOG_INCLUDE_DIRS += $(PWD)/rtl/vmod/rams/synth
-VERILOG_INCLUDE_DIRS += $(PWD)/rtl/vmod/nvdla
-VERILOG_INCLUDE_DIRS += $(PWD)/rtl/spec/odif
-VERILOG_INCLUDE_DIRS += $(PWD)/rtl/spec/manual
-VERILOG_INCLUDE_DIRS += $(PWD)/rtl/vmod/defs
+VERILOG_INCLUDE_DIRS += $(WPWD)/rtl
+VERILOG_INCLUDE_DIRS += $(WPWD)/rtl/vmod/include
+VERILOG_INCLUDE_DIRS += $(WPWD)/rtl/vmod/vlibs
+VERILOG_INCLUDE_DIRS += $(WPWD)/rtl/vmod/rams/model
+VERILOG_INCLUDE_DIRS += $(WPWD)/rtl/vmod/rams/synth
+VERILOG_INCLUDE_DIRS += $(WPWD)/rtl/vmod/nvdla
+VERILOG_INCLUDE_DIRS += $(WPWD)/rtl/spec/odif
+VERILOG_INCLUDE_DIRS += $(WPWD)/rtl/spec/manual
+VERILOG_INCLUDE_DIRS += $(WPWD)/rtl/vmod/defs
 
-COMPILE_ARGS += -f $(PWD)/rtl_sources.f
+COMPILE_ARGS += -f $(WPWD)/rtl_sources.f
 ifeq ($(SIM),questa-compat)
 COMPILE_ARGS += +define+SYNTHESIS
 endif
 
-VERILOG_SOURCES += $(PWD)/rtl/dram.sv
-VERILOG_SOURCES += $(PWD)/rtl/NVDLA_top.sv
+VERILOG_SOURCES += $(WPWD)/rtl/dram.sv
+VERILOG_SOURCES += $(WPWD)/rtl/NVDLA_top.sv
 
 # TOPLEVEL is the name of the toplevel module in your Verilog file
 TOPLEVEL = NVDLA_top
