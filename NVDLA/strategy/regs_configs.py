@@ -1,128 +1,282 @@
-from strategy.Layers_regs_addresses import PDP_REG 
+import math
+from strategy.Layers_regs_addresses import PDP_REG
 from strategy.Layers_regs_addresses import PDP_RDMA_REG
-    
-    
+
+
+# Lookup tables for encoding
+_POOL_METHOD = {'avg': 0x0, 'max': 0x1, 'min': 0x2}
+_DATA_FMT    = {'INT8': 0x0, 'INT16': 0x1, 'FP16': 0x2}
+_BYTES_PER_EL = {'INT8': 1, 'INT16': 2, 'FP16': 2}
 
 
 class RegistrationConfigs:
-    def pooling_configs(self, layer_configs):
-        return [  
-            # PDP CORE - Status and Control
+
+    # ------------------------------------------------------------------ helpers
+    @staticmethod
+    def _recip_fixed(kernel_dim):
+        """Reciprocal in Q0.16 fixed-point: round(65536 / kernel_dim)."""
+        return round(65536 / kernel_dim) if kernel_dim > 0 else 0x10000
+
+    @staticmethod
+    def _partial_width_reg(total_width):
+        """
+        Build D_PARTIAL_WIDTH_IN / _OUT for split_num=0 (single split).
+        FIRST = total_width-1, MID = 0, LAST = 0  (only FIRST matters).
+        Layout: [9:0]=FIRST-1, [19:10]=LAST-1, [29:20]=MID-1
+        With a single split, first = total_width - 1.
+        """
+        first = (total_width - 1) & 0x3FF
+        return first  # MID=0, LAST=0 → upper bits stay 0
+
+    @staticmethod
+    def _output_dim(input_dim, pad_before, pad_after, kernel, stride):
+        """Compute output size: (input + pad_before + pad_after - kernel) / stride + 1"""
+        return (input_dim + pad_before + pad_after - kernel) // stride + 1
+
+    # ----------------------------------------------------------- main function
+    @staticmethod
+    def _split_addr(addr):
+        """Split a 64-bit address into (low_32, high_32) for NVDLA registers."""
+        return addr & 0xFFFFFFFF, (addr >> 32) & 0xFFFFFFFF
+
+    def pooling_configs(self, layer_configs, src_addr=0x0, dst_addr=0x100):
+        """
+        Build PDP + PDP_RDMA register list from a YAML layer config dict.
+
+        Expected keys in layer_configs:
+            kernel_size     : int
+            stride          : int
+            pool_type       : str  ('avg' | 'max' | 'min')
+            input_shape     : [height, width]
+            data_range      : [min, max]
+            data_format     : str  ('INT8' | 'INT16' | 'FP16')
+            padding_left    : int  (default 0)
+            padding_right   : int  (default 0)
+            padding_top     : int  (default 0)
+            padding_bottom  : int  (default 0)
+            padding_value   : int  (default 0)
+
+        Args:
+            layer_configs: dict with keys listed above
+            src_addr: source base address in DRAM (input data)
+            dst_addr: destination base address in DRAM (output data,
+                      must not overlap the input region)
+        """
+        # ---------- extract config values ----------
+        kernel   = layer_configs['kernel_size']
+        stride   = layer_configs['stride']
+        pool_type = layer_configs['pool_type']
+        in_h, in_w = layer_configs['input_shape']
+        data_fmt = layer_configs.get('data_format', 'INT8')
+
+        pad_l = layer_configs.get('padding_left', 0)
+        pad_r = layer_configs.get('padding_right', 0)
+        pad_t = layer_configs.get('padding_top', 0)
+        pad_b = layer_configs.get('padding_bottom', 0)
+        pad_val = layer_configs.get('padding_value', 0)
+
+        # Single-channel for now
+        channels = 1
+
+        bpe = _BYTES_PER_EL[data_fmt]
+
+        # NVDLA memory atomic size (nv_small = 8 bytes).
+        # Each spatial pixel stores ceil(C*bpe / ATOM) atoms of data.
+        ATOM = 8
+        atoms_per_pixel = max(1, (channels * bpe + ATOM - 1) // ATOM)
+        pixel_bytes = atoms_per_pixel * ATOM  # bytes per pixel in memory
+
+        # ---------- derived dimensions ----------
+        out_w = self._output_dim(in_w, pad_l, pad_r, kernel, stride)
+        out_h = self._output_dim(in_h, pad_t, pad_b, kernel, stride)
+
+        # ---------- register field encodings ----------
+        # Kernel/stride: value-1 encoding
+        k_enc = kernel - 1       # 0-7
+        s_enc = stride - 1       # 0-15
+
+        # PDP D_POOLING_KERNEL_CFG
+        #   [3:0]=kernel_width-1, [11:8]=kernel_height-1,
+        #   [19:16]=stride_width-1, [23:20]=stride_height-1
+        pdp_kernel_cfg = (
+            (k_enc & 0xF)
+            | ((k_enc & 0xF) << 8)
+            | ((s_enc & 0xF) << 16)
+            | ((s_enc & 0xF) << 20)
+        )
+
+        # PDP_RDMA D_POOLING_KERNEL_CFG
+        #   [3:0]=kernel_width-1, [7:4]=stride_width-1
+        rdma_kernel_cfg = (k_enc & 0xF) | ((s_enc & 0xF) << 4)
+
+        # PDP D_OPERATION_MODE_CFG
+        #   [1:0]=method, [4]=flying(1=OFF), [15:8]=split_num(0=1 split)
+        method_enc = _POOL_METHOD[pool_type]
+        flying = 1  # OFF_FLYING (read from memory via RDMA)
+        split_num = 0
+        op_mode_cfg = method_enc | (flying << 4) | (split_num << 8)
+
+        # PDP D_POOLING_PADDING_CFG
+        #   [2:0]=L, [6:4]=T, [10:8]=R, [14:12]=B
+        pdp_pad_cfg = (
+            (pad_l & 0x7)
+            | ((pad_t & 0x7) << 4)
+            | ((pad_r & 0x7) << 8)
+            | ((pad_b & 0x7) << 12)
+        )
+
+        # PDP_RDMA D_POOLING_PADDING_CFG  [3:0] = max(pad_l, pad_r)
+        rdma_pad_cfg = max(pad_l, pad_r) & 0xF
+
+        # Reciprocal (only meaningful for AVG pooling, but always written)
+        recip_w = self._recip_fixed(kernel)
+        recip_h = self._recip_fixed(kernel)
+
+        # Data format register
+        fmt_enc = _DATA_FMT[data_fmt]
+
+        # Memory layout — atom-aligned data
+        # In NVDLA nv_small, each pixel occupies one 8-byte atom in memory.
+        # Line stride  = W * pixel_bytes   (distance between consecutive rows)
+        # Surface stride = line_stride * H  (distance between channel surfaces)
+        src_line_stride    = in_w * pixel_bytes
+        src_surface_stride = src_line_stride * in_h
+
+        dst_line_stride    = out_w * pixel_bytes
+        dst_surface_stride = dst_line_stride * out_h
+
+        # Source / destination base addresses — split into low and high 32-bit parts
+        src_addr_low, src_addr_high = self._split_addr(src_addr)
+        dst_addr_low, dst_addr_high = self._split_addr(dst_addr)
+
+        # Partial widths (single split)
+        partial_in  = self._partial_width_reg(in_w + pad_l + pad_r)
+        partial_out = self._partial_width_reg(out_w)
+
+        # RDMA partial width
+        rdma_partial_in = self._partial_width_reg(in_w + pad_l + pad_r)
+
+        # Padding fill value — sign-extend to 19 bits for the register
+        pad_val_19 = pad_val & 0x7FFFF
+
+        # ========================= BUILD REGISTER LIST =========================
+        return [
+            # -------- PDP CORE: Status and Control --------
             (PDP_REG.S_STATUS, 0x00000000),
             (PDP_REG.S_POINTER, 0x00000000),
-            
-            # PDP CORE - Input Data Cube
-            (PDP_REG.D_DATA_CUBE_IN_WIDTH, 0x00000000),
-            (PDP_REG.D_DATA_CUBE_IN_HEIGHT, 0x00000000),
-            (PDP_REG.D_DATA_CUBE_IN_CHANNEL, 0x00000000),
-            
-            # PDP CORE - Output Data Cube
-            (PDP_REG.D_DATA_CUBE_OUT_WIDTH, 0x00000000),
-            (PDP_REG.D_DATA_CUBE_OUT_HEIGHT, 0x00000000),
-            (PDP_REG.D_DATA_CUBE_OUT_CHANNEL, 0x00000000),
-            
-            # PDP CORE - Operation Mode
-            (PDP_REG.D_OPERATION_MODE_CFG, 0x00000010),
-            (PDP_REG.D_NAN_FLUSH_TO_ZERO, 0x00000000),
-            
-            # PDP CORE - Partial Width
-            (PDP_REG.D_PARTIAL_WIDTH_IN, 0x27C9B90A),
-            (PDP_REG.D_PARTIAL_WIDTH_OUT, 0x2C571256),
-            
-            # PDP CORE - Pooling Kernel
-            (PDP_REG.D_POOLING_KERNEL_CFG, 0x00110202),
-            (PDP_REG.D_RECIP_KERNEL_HEIGHT, 0x00005555),
-            (PDP_REG.D_RECIP_KERNEL_WIDTH, 0x00005555),
-            
-            # PDP CORE - Pooling Padding
-            (PDP_REG.D_POOLING_PADDING_CFG, 0x00000022),
-            (PDP_REG.D_POOLING_PADDING_VALUE_1_CFG, 0x00000010),
-            (PDP_REG.D_POOLING_PADDING_VALUE_2_CFG, 0x00000020),
-            (PDP_REG.D_POOLING_PADDING_VALUE_3_CFG, 0x00000030),
-            (PDP_REG.D_POOLING_PADDING_VALUE_4_CFG, 0x00000040),
-            (PDP_REG.D_POOLING_PADDING_VALUE_5_CFG, 0x00000050),
-            (PDP_REG.D_POOLING_PADDING_VALUE_6_CFG, 0x00000060),
-            (PDP_REG.D_POOLING_PADDING_VALUE_7_CFG, 0x00000070),
-            
-            # PDP CORE - Source Memory
-            (PDP_REG.D_SRC_BASE_ADDR_LOW, 0x00000000),
-            (PDP_REG.D_SRC_BASE_ADDR_HIGH, 0x00000000),
-            (PDP_REG.D_SRC_LINE_STRIDE, 0x000003A0),
-            (PDP_REG.D_SRC_SURFACE_STRIDE, 0x00000D00),
-            
-            # PDP CORE - Destination Memory
-            (PDP_REG.D_DST_BASE_ADDR_LOW, 0x00000100),    # 256
-            (PDP_REG.D_DST_BASE_ADDR_HIGH, 0x00000000),
-            (PDP_REG.D_DST_LINE_STRIDE, 0x00002000),
-            (PDP_REG.D_DST_SURFACE_STRIDE, 0x000026C0),
-            (PDP_REG.D_DST_RAM_CFG, 0x00000001),
-            
-            # PDP CORE - Data Format
-            (PDP_REG.D_DATA_FORMAT, 0x00000000),
-            
-            # PDP CORE - Statistics
-            (PDP_REG.D_INF_INPUT_NUM, 0x00000000),
-            (PDP_REG.D_NAN_INPUT_NUM, 0x00000000),
+
+            # -------- PDP CORE: Input Data Cube (value-1 encoding) --------
+            (PDP_REG.D_DATA_CUBE_IN_WIDTH,   in_w - 1),
+            (PDP_REG.D_DATA_CUBE_IN_HEIGHT,  in_h - 1),
+            (PDP_REG.D_DATA_CUBE_IN_CHANNEL, channels - 1),
+
+            # -------- PDP CORE: Output Data Cube (value-1 encoding) --------
+            (PDP_REG.D_DATA_CUBE_OUT_WIDTH,   out_w - 1),
+            (PDP_REG.D_DATA_CUBE_OUT_HEIGHT,  out_h - 1),
+            (PDP_REG.D_DATA_CUBE_OUT_CHANNEL, channels - 1),
+
+            # -------- PDP CORE: Operation Mode --------
+            (PDP_REG.D_OPERATION_MODE_CFG, op_mode_cfg),
+            (PDP_REG.D_NAN_FLUSH_TO_ZERO,  0x00000000),
+
+            # -------- PDP CORE: Partial Width --------
+            (PDP_REG.D_PARTIAL_WIDTH_IN,  partial_in),
+            (PDP_REG.D_PARTIAL_WIDTH_OUT, partial_out),
+
+            # -------- PDP CORE: Pooling Kernel --------
+            (PDP_REG.D_POOLING_KERNEL_CFG, pdp_kernel_cfg),
+            (PDP_REG.D_RECIP_KERNEL_HEIGHT, recip_h),
+            (PDP_REG.D_RECIP_KERNEL_WIDTH,  recip_w),
+
+            # -------- PDP CORE: Pooling Padding --------
+            (PDP_REG.D_POOLING_PADDING_CFG,           pdp_pad_cfg),
+            (PDP_REG.D_POOLING_PADDING_VALUE_1_CFG,   pad_val_19),
+            (PDP_REG.D_POOLING_PADDING_VALUE_2_CFG,   pad_val_19),
+            (PDP_REG.D_POOLING_PADDING_VALUE_3_CFG,   pad_val_19),
+            (PDP_REG.D_POOLING_PADDING_VALUE_4_CFG,   pad_val_19),
+            (PDP_REG.D_POOLING_PADDING_VALUE_5_CFG,   pad_val_19),
+            (PDP_REG.D_POOLING_PADDING_VALUE_6_CFG,   pad_val_19),
+            (PDP_REG.D_POOLING_PADDING_VALUE_7_CFG,   pad_val_19),
+
+            # -------- PDP CORE: Source Memory --------
+            (PDP_REG.D_SRC_BASE_ADDR_LOW,  src_addr_low),
+            (PDP_REG.D_SRC_BASE_ADDR_HIGH, src_addr_high),
+            (PDP_REG.D_SRC_LINE_STRIDE,    src_line_stride),
+            (PDP_REG.D_SRC_SURFACE_STRIDE, src_surface_stride),
+
+            # -------- PDP CORE: Destination Memory --------
+            (PDP_REG.D_DST_BASE_ADDR_LOW,    dst_addr_low),
+            (PDP_REG.D_DST_BASE_ADDR_HIGH,   dst_addr_high),
+            (PDP_REG.D_DST_LINE_STRIDE,      dst_line_stride),
+            (PDP_REG.D_DST_SURFACE_STRIDE,   dst_surface_stride),
+            (PDP_REG.D_DST_RAM_CFG,          0x00000001),   # MC (external memory)
+
+            # -------- PDP CORE: Data Format --------
+            (PDP_REG.D_DATA_FORMAT, fmt_enc),
+
+            # -------- PDP CORE: Statistics (read-only, write zeros to clear) --------
+            (PDP_REG.D_INF_INPUT_NUM,  0x00000000),
+            (PDP_REG.D_NAN_INPUT_NUM,  0x00000000),
             (PDP_REG.D_NAN_OUTPUT_NUM, 0x00000000),
-            
-            # PDP CORE - Performance Monitoring
-            (PDP_REG.D_PERF_ENABLE, 0x00000001),
+
+            # -------- PDP CORE: Performance --------
+            (PDP_REG.D_PERF_ENABLE,      0x00000000),
             (PDP_REG.D_PERF_WRITE_STALL, 0x00000000),
-            
-            # PDP CORE - Debug
-            (PDP_REG.D_CYA, 0x19D97A33),
-            
-            # PDP RDMA - Status and Control
-            (PDP_RDMA_REG.S_STATUS, 0x00000000),
+
+            # -------- PDP CORE: Debug --------
+            (PDP_REG.D_CYA, 0x00000000),
+
+            # ======== PDP RDMA: Status and Control ========
+            (PDP_RDMA_REG.S_STATUS,  0x00000000),
             (PDP_RDMA_REG.S_POINTER, 0x00000000),
-            
-            # PDP RDMA - Input Data Cube
-            (PDP_RDMA_REG.D_DATA_CUBE_IN_WIDTH, 0x00000000),
-            (PDP_RDMA_REG.D_DATA_CUBE_IN_HEIGHT, 0x00000000),
-            (PDP_RDMA_REG.D_DATA_CUBE_IN_CHANNEL, 0x00000000),
-            
-            # PDP RDMA - Flying Mode
-            (PDP_RDMA_REG.D_FLYING_MODE, 0x00000001),
-            
-            # PDP RDMA - Source Memory
-            (PDP_RDMA_REG.D_SRC_BASE_ADDR_LOW, 0x00000000),
-            (PDP_RDMA_REG.D_SRC_BASE_ADDR_HIGH, 0x00000000),
-            (PDP_RDMA_REG.D_SRC_LINE_STRIDE, 0x000003A0),
-            (PDP_RDMA_REG.D_SRC_SURFACE_STRIDE, 0x00000D00),
-            (PDP_RDMA_REG.D_SRC_RAM_CFG, 0x00000001),
-            
-            # PDP RDMA - Data Format and Operation
-            (PDP_RDMA_REG.D_DATA_FORMAT, 0x00000000),
-            (PDP_RDMA_REG.D_OPERATION_MODE_CFG, 0x00000000),
-            
-            # PDP RDMA - Pooling Configuration
-            (PDP_RDMA_REG.D_POOLING_KERNEL_CFG, 0x00000012),
-            (PDP_RDMA_REG.D_POOLING_PADDING_CFG, 0x00000006),
-            (PDP_RDMA_REG.D_PARTIAL_WIDTH_IN, 0x27C9B90A),
-            
-            # PDP RDMA - Performance Monitoring
-            (PDP_RDMA_REG.D_PERF_ENABLE, 0x00000000),
+
+            # ======== PDP RDMA: Input Data Cube (value-1 encoding) ========
+            (PDP_RDMA_REG.D_DATA_CUBE_IN_WIDTH,   in_w - 1),
+            (PDP_RDMA_REG.D_DATA_CUBE_IN_HEIGHT,  in_h - 1),
+            (PDP_RDMA_REG.D_DATA_CUBE_IN_CHANNEL, channels - 1),
+
+            # ======== PDP RDMA: Flying Mode ========
+            (PDP_RDMA_REG.D_FLYING_MODE, 0x00000001),  # OFF_FLYING
+
+            # ======== PDP RDMA: Source Memory ========
+            (PDP_RDMA_REG.D_SRC_BASE_ADDR_LOW,  src_addr_low),
+            (PDP_RDMA_REG.D_SRC_BASE_ADDR_HIGH, src_addr_high),
+            (PDP_RDMA_REG.D_SRC_LINE_STRIDE,    src_line_stride),
+            (PDP_RDMA_REG.D_SRC_SURFACE_STRIDE, src_surface_stride),
+            (PDP_RDMA_REG.D_SRC_RAM_CFG,        0x00000001),  # MC
+
+            # ======== PDP RDMA: Data Format and Operation ========
+            (PDP_RDMA_REG.D_DATA_FORMAT,          fmt_enc),
+            (PDP_RDMA_REG.D_OPERATION_MODE_CFG,   split_num),  # split_num only
+
+            # ======== PDP RDMA: Pooling Configuration ========
+            (PDP_RDMA_REG.D_POOLING_KERNEL_CFG,  rdma_kernel_cfg),
+            (PDP_RDMA_REG.D_POOLING_PADDING_CFG, rdma_pad_cfg),
+            (PDP_RDMA_REG.D_PARTIAL_WIDTH_IN,    rdma_partial_in),
+
+            # ======== PDP RDMA: Performance ========
+            (PDP_RDMA_REG.D_PERF_ENABLE,     0x00000000),
             (PDP_RDMA_REG.D_PERF_READ_STALL, 0x00000000),
-            
-            # PDP RDMA - Debug
-            (PDP_RDMA_REG.D_CYA, 0x81E7F8F3),
-            
-            # ENABLE OPERATIONS (Must be last!)
-            (PDP_REG.D_OP_ENABLE, 0x00000001),
-            (PDP_RDMA_REG.D_OP_ENABLE, 0x00000001)
-          ]   # NVDLA_PDP_RDMA_D_OP_ENABLE_0
-    
+
+            # ======== PDP RDMA: Debug ========
+            (PDP_RDMA_REG.D_CYA, 0x00000000),
+
+            # ======== ENABLE OPERATIONS (Must be last! RDMA first) ========
+            (PDP_RDMA_REG.D_OP_ENABLE, 0x00000001),
+            (PDP_REG.D_OP_ENABLE,      0x00000001),
+        ]
+
     def conv_configs(self):
         pass
-    
+
     def fullyConnected_configs(self):
         pass
-    
+
     def activation_configs(self):
         pass
-    
+
     def normalization_configs(self):
         pass
-    
+
     def regularization_configs(self):
         pass
