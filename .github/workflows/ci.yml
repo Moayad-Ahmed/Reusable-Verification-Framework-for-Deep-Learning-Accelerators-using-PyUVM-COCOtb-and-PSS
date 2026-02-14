@@ -21,9 +21,9 @@ jobs:
       - name: Install Icarus Iverilog
         run: |
           sudo apt-get update
-          sudo apt-get install -y iverilog
+          sudo apt-get install -y iverilog ccache
       
-      - name: Install OSS CAD Suite (Verilator)
+      - name: Install OSS CAD Suite for Verilator
         run: |
           wget -qO oss-cad-suite.tgz \
             https://github.com/YosysHQ/oss-cad-suite-build/releases/download/2026-02-14/oss-cad-suite-linux-x64-20260214.tgz
@@ -35,11 +35,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
-      - name: Cache Verilator build
-        uses: actions/cache@v4
+      # Caches individual g++ compilations.
+      - name: Set up ccache for verilator
+        uses: hendrikmuhs/ccache-action@v1.2
         with:
-          path: NVDLA/sim_build
-          key: verilator-${{ hashFiles('NVDLA/**/*.v', 'NVDLA/**/*.sv', 'NVDLA/Makefile') }}
+          key: verilator-ccache-${{ runner.os }}
 
       - name: Build and Run Standalone layers tests (Icarus)
         working-directory: Standalone_Layers
@@ -51,5 +51,7 @@ jobs:
         working-directory: NVDLA
         run: |
           export PATH=$HOME/oss-cad-suite/bin:$PATH
+          # Route all g++ calls through ccache transparently
+          export PATH=/usr/lib/ccache:$PATH
           PYTHONPATH=$PWD:$PWD/pyuvm_components:$PWD/strategy:$PWD/utils:$(python -c "import site; print(':'.join(site.getsitepackages()))") \
           make -j2 SIM=verilator COCOTB_TEST_MODULES=pyuvm_components.test
