@@ -1,0 +1,23 @@
+# NVDLA PDP Pooling — 8x8 MAX, kernel=4, stride=4 → 2x2 output
+
+test_suite:
+  - name: "NVDLA_8x8_MAX_k4_s4"
+    description: "8x8 Max Pooling, kernel=4, stride=4 → 2x2 output"
+
+    layers:
+      - type: "pooling"
+        config:
+          kernel_size: 4
+          stride: 4
+          pool_type: "max"
+
+          input_shape: [8, 8]
+          data_range: [-128, 127]
+
+          padding_left: 0
+          padding_right: 0
+          padding_top: 0
+          padding_bottom: 0
+          padding_value: 0
+
+          data_format: "INT8"

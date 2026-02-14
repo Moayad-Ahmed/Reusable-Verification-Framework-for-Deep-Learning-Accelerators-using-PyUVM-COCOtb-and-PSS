@@ -1,0 +1,24 @@
+# NVDLA PDP Pooling — 6x6 MAX, kernel=3, stride=1, padding=2, padding_value=-64
+# Output size: (6 + 2 + 2 - 3)/1 + 1 = 8  => 8x8
+
+test_suite:
+  - name: "NVDLA_6x6_MAX_k3_s1_pad2_valm64"
+    description: "6x6 Max Pooling, kernel=3, stride=1, padding=2, padding_value=-64 → 8x8 output"
+
+    layers:
+      - type: "pooling"
+        config:
+          kernel_size: 3
+          stride: 1
+          pool_type: "max"
+
+          input_shape: [6, 6]
+          data_range: [-128, 127]
+
+          padding_left: 2
+          padding_right: 2
+          padding_top: 2
+          padding_bottom: 2
+          padding_value: -64
+
+          data_format: "INT8"

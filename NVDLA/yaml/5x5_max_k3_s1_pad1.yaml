@@ -1,0 +1,23 @@
+# NVDLA PDP Pooling — 5x5 AVG, kernel=3, stride=1, pad=1 → 5x5 output (same-size)
+
+test_suite:
+  - name: "NVDLA_5x5_AVG_k3_s1_pad1"
+    description: "5x5 Avg Pooling, kernel=3, stride=1, padding=1 → 5x5 output"
+
+    layers:
+      - type: "pooling"
+        config:
+          kernel_size: 3
+          stride: 1
+          pool_type: "avg"
+
+          input_shape: [5, 5]
+          data_range: [-128, 127]
+
+          padding_left: 1
+          padding_right: 1
+          padding_top: 1
+          padding_bottom: 1
+          padding_value: 0
+
+          data_format: "INT8"

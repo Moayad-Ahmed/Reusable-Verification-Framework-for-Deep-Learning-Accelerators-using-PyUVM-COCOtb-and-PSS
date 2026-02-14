@@ -1,0 +1,23 @@
+# NVDLA PDP Pooling — 4x4 MIN, kernel=2, stride=1 → 3x3 output
+
+test_suite:
+  - name: "NVDLA_4x4_MIN_k2_s1"
+    description: "4x4 Min Pooling, kernel=2, stride=1 → 3x3 output"
+
+    layers:
+      - type: "pooling"
+        config:
+          kernel_size: 2
+          stride: 1
+          pool_type: "min"
+
+          input_shape: [4, 4]
+          data_range: [-128, 127]
+
+          padding_left: 0
+          padding_right: 0
+          padding_top: 0
+          padding_bottom: 0
+          padding_value: 0
+
+          data_format: "INT8"

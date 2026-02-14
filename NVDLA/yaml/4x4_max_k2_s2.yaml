@@ -1,23 +1,23 @@
-# NVDLA PDP Pooling Test Configuration
+# NVDLA PDP Pooling — 4x4 MAX, kernel=2, stride=2 → 2x2 output
 
 test_suite:
-  - name: "NVDLA_8x8_AVG_k2_s2"
-    description: "8x8 Avg Pooling, kernel=2, stride=2 → 4x4 output"
-    
+  - name: "NVDLA_4x4_MAX_k2_s2"
+    description: "4x4 Max Pooling, kernel=2, stride=2 → 2x2 output"
+
     layers:
       - type: "pooling"
         config:
           kernel_size: 2
           stride: 2
-          pool_type: "avg"
-          
-          input_shape: [8, 8]       # [height, width]  → output 4x4
+          pool_type: "max"
+
+          input_shape: [4, 4]
           data_range: [-128, 127]
-          
+
           padding_left: 0
           padding_right: 0
           padding_top: 0
           padding_bottom: 0
           padding_value: 0
-          
+
           data_format: "INT8"
