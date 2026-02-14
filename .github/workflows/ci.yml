@@ -1,4 +1,4 @@
-name: cocotb + pyuvm CI (Icarus Iverilog)
+name: CI
 
 on:
   push:
@@ -12,24 +12,44 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python (with pip cache)
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
           cache: "pip"
 
-      - name: Install system dependencies
+      - name: Install Icarus Iverilog
         run: |
           sudo apt-get update
           sudo apt-get install -y iverilog
-
+      
+      - name: Install OSS CAD Suite (Verilator)
+        run: |
+          wget -qO oss-cad-suite.tgz \
+            https://github.com/YosysHQ/oss-cad-suite-build/releases/download/2026-02-14/oss-cad-suite-linux-x64-20260214.tgz
+          tar -xzf oss-cad-suite.tgz
+          mv oss-cad-suite $HOME/oss-cad-suite
+      
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
 
-      - name: Build + Run cocotb tests
+      - name: Cache Verilator build
+        uses: actions/cache@v4
+        with:
+          path: NVDLA/sim_build
+          key: verilator-${{ hashFiles('NVDLA/**/*.v', 'NVDLA/**/*.sv', 'NVDLA/Makefile') }}
+
+      - name: Build and Run Standalone layers tests (Icarus)
         working-directory: Standalone_Layers
         run: |
           PYTHONPATH=$PWD:$PWD/pyuvm_components:$PWD/strategy:$PWD/utils \
           make SIM=icarus COCOTB_TEST_MODULES=pyuvm_components.test
+      
+      - name: Build and Run NVDLA tests (Verilator)
+        working-directory: NVDLA
+        run: |
+          export PATH=$HOME/oss-cad-suite/bin:$PATH
+          PYTHONPATH=$PWD:$PWD/pyuvm_components:$PWD/strategy:$PWD/utils:$(python -c "import site; print(':'.join(site.getsitepackages()))") \
+          make -j2 SIM=verilator COCOTB_TEST_MODULES=pyuvm_components.test
