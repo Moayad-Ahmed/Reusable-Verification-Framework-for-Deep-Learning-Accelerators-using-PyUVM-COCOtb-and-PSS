@@ -79,9 +79,8 @@ class PdpTestSequence(uvm_sequence):
         # Load YAML configuration
         config = self.load_yaml_config()
         bfm = NvdlaBFM()
-        num_iterations = 20
 
-        for i in range(num_iterations):
+        for i in range(100):
             seq_item = PdpTransaction("pdp_tx", strategy)
 
             # Generate input data
@@ -114,10 +113,9 @@ class PdpTestSequence(uvm_sequence):
             await self.finish_item(seq_item)
 
             # Wait for the scoreboard to finish checking this iteration
+
             await bfm.iteration_done_queue.get()
             print(f"Iteration {i} checked by scoreboard.")
 
-            # Reset the BFM between iterations (skip after the last one)
-            if i < num_iterations - 1:
-                print(f"Resetting BFM before iteration {i + 1}...")
-                await bfm.reset()
+
+            

@@ -11,6 +11,7 @@ class NVDLA_Driver(uvm_driver):
 
         while True:
             seq_item = await self.seq_item_port.get_next_item()
+            await self.bfm.reset()
 
             # Load input data into DRAM
             try:
