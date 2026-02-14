@@ -14,3 +14,4 @@ NVDLA/pyuvm_components/__pycache__/
 NVDLA/strategy/__pycache__/
 NVDLA/utils/__pycache__/
 NVDLA/sim_build/
+sim_build/
