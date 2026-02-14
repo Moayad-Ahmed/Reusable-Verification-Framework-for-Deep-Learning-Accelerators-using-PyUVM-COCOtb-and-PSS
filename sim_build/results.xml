@@ -1,0 +1,6 @@
+<testsuites name="results">
+  <testsuite name="all" package="all">
+    <property name="random_seed" value="1771052147" />
+    <testcase name="PdpBasicTest" classname="pyuvm_components.test" file="C:\Users\youse\AppData\Local\Programs\Python\Python312\Lib\site-packages\pyuvm\extension_classes.py" lineno="24" time="12.697758674621582" sim_time_ns="805200.0" ratio_time="63412.76603478972" />
+  </testsuite>
+</testsuites>

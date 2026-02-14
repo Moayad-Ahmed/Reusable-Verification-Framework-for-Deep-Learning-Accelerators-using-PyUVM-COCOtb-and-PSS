@@ -50,3 +50,100 @@ Scoreboard  ◄── Golden Model (Python)
      ▼
 Coverage & Reporting
 ```
+
+## 🚀 Getting Started
+
+> 💡 **Quick Start**: See [NVDLA/QUICK_START.md](NVDLA/QUICK_START.md) for a fast setup guide!
+
+### Prerequisites
+
+- Python 3.8 or higher
+- QuestaSim/ModelSim
+- Required Python packages:
+  ```bash
+  pip install -r requirements.txt
+  ```
+
+- Set `QUESTA_HOME` environment variable:
+  ```bash
+  # Windows PowerShell
+  $env:QUESTA_HOME = "C:\questasim64_2024.1\win64"
+  
+  # Linux/Mac
+  export QUESTA_HOME="/path/to/questasim/bin"
+  ```
+
+### Running Tests
+
+This framework supports two verification targets:
+
+#### 1. NVDLA Framework (Hardware Accelerator)
+
+Located in the `NVDLA/` directory, this verifies the NVIDIA Deep Learning Accelerator (NVDLA) pooling functionality.
+
+**Option A: Using Makefile**
+```bash
+cd NVDLA
+make
+```
+
+**Option B: Using Python Runner**
+```bash
+cd NVDLA
+python test_runner.py
+```
+
+#### 2. Standalone Layers (Generic DNN Layers)
+
+Located in the `Standalone_Layers/` directory, this verifies standalone implementations of common DNN layers (Conv, Pool, FC, Activation).
+
+**Option A: Using Makefile**
+```bash
+cd Standalone_Layers
+make
+```
+
+**Option B: Using Python Runner**
+```bash
+cd Standalone_Layers
+python test_runner.py
+```
+
+### Cleaning Build Artifacts
+
+To clean all generated files and artifacts:
+
+**Using Makefile:**
+```bash
+make cleanall
+```
+
+**Using Python Runner:**
+The test runner automatically cleans artifacts before each run.
+
+## 📁 Project Structure
+
+```
+├── NVDLA/                          # NVDLA accelerator verification
+│   ├── pyuvm_components/           # PyUVM testbench components
+│   ├── rtl/                        # RTL design files
+│   ├── strategy/                   # Layer strategies and PSS
+│   ├── utils/                      # Utility functions
+│   ├── yaml/                       # Configuration files
+│   ├── Makefile                    # Make-based runner
+│   └── test_runner.py              # Python-based runner
+│
+├── Standalone_Layers/              # Standalone layer verification
+│   ├── pyuvm_components/           # PyUVM testbench components
+│   ├── rtl/                        # RTL design files
+│   ├── strategy/                   # Layer strategies
+│   ├── utils/                      # Utility functions
+│   ├── yaml_files/                 # Test configurations
+│   ├── Makefile                    # Make-based runner
+│   └── test_runner.py              # Python-based runner
+│
+└── docs/                           # Documentation
+    ├── architecture.md
+    ├── pss_overview.md
+    └── verification_flow.md
+```
