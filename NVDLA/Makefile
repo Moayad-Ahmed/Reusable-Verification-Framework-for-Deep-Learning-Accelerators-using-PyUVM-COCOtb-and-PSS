@@ -33,6 +33,34 @@ VERILOG_INCLUDE_DIRS += $(WPWD)/rtl/vmod/defs
 COMPILE_ARGS += -f $(WPWD)/rtl_sources.f
 ifeq ($(SIM),questa-compat)
 COMPILE_ARGS += +define+SYNTHESIS
+else ifeq ($(SIM),verilator)
+COMPILE_ARGS += +define+SYNTHESIS
+COMPILE_ARGS += --no-timing
+
+# Speed up compilation
+COMPILE_ARGS += --build-jobs $(shell nproc)   # parallel C++ compilation
+COMPILE_ARGS += -O1 --noassert
+
+# Disable unused features
+COMPILE_ARGS += --no-coverage
+COMPILE_ARGS += --no-trace-coverage
+
+# Suppress warnings
+COMPILE_ARGS += -Wno-fatal
+COMPILE_ARGS += -Wno-PINMISSING
+COMPILE_ARGS += -Wno-IMPLICITSTATIC
+COMPILE_ARGS += -Wno-IMPLICIT
+COMPILE_ARGS += -Wno-WIDTHTRUNC
+COMPILE_ARGS += -Wno-WIDTHEXPAND
+COMPILE_ARGS += -Wno-WIDTHXZEXPAND
+COMPILE_ARGS += -Wno-UNSIGNED
+COMPILE_ARGS += -Wno-CASEINCOMPLETE
+COMPILE_ARGS += -Wno-COMBDLY
+COMPILE_ARGS += -Wno-LATCH
+COMPILE_ARGS += -Wno-MULTIDRIVEN
+COMPILE_ARGS += -Wno-UNOPTFLAT
+COMPILE_ARGS += -Wno-ASCRANGE
+COMPILE_ARGS += -Wno-ALWNEVER
 endif
 
 VERILOG_SOURCES += $(WPWD)/rtl/dram.sv
