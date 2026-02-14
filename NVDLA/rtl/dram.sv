@@ -7,7 +7,7 @@
 module dbbif_dual_port_dram #(
     parameter ADDR_WIDTH = 32,            // 32 or 64 bits
     parameter DATA_WIDTH = 64,            // 32/64/128/256/512 bits
-    parameter MEM_SIZE   = 1024           // Memory size in bytes
+    parameter MEM_SIZE   = 4096           // Memory size in bytes
 )(
     input  wire                       clk,
     input  wire                       rst_n,

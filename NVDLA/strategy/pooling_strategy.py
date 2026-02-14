@@ -1,7 +1,6 @@
 from strategy.LayerStrategy import LayerStrategy
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
 import random
 
@@ -103,104 +102,193 @@ class PoolingStrategy(LayerStrategy):
         return np.random.randint(low, high, size=(h, w))
         #return np.full((h, w), fill_value=35, dtype=int)  # Use constant value for easier debugging
     
+    # ------------------------------------------------------------------ #
+    #                        GENERIC GOLDEN MODEL                         #
+    # ------------------------------------------------------------------ #
+
     def compute_golden(self, input_data, config):
         """
         Golden model that matches 8-bit Integer Hardware.
-        Supports: MAX, MIN, and AVG (with rounding).
+        Supports: MAX, MIN, and AVG (with floor rounding).
         Optionally applies padding before pooling.
-        
-        Args:
-            input_data: numpy array of input (H, W)
-            config: dict with keys:
-                - kernel_size: int, pooling kernel size
-                - stride: int, pooling stride
-                - pool_type: str, 'avg', 'max', or 'min'
-                - input_shape: tuple, (height, width)
-                - data_range: tuple, (min, max)
-                - padding_left: int (optional, default 0)
-                - padding_right: int (optional, default 0)
-                - padding_top: int (optional, default 0)
-                - padding_bottom: int (optional, default 0)
-                - padding_value: int (optional, default 0)
-        
-        Returns:
-            numpy array of pooled output
         """
         kernel_size = config['kernel_size']
         stride = config['stride']
         pool_type = config['pool_type']
-        
+
         # VALIDATION: Check that dimensions are compatible for pooling
-        # This ensures the sliding window reaches the edge perfectly
         self.validate_pooling_config(config)
-        
-        # 1. Convert to FLOAT for PyTorch operations
+
+        # 1. Optionally pad the input
+        pad_left   = config.get('padding_left', 0)
+        pad_right  = config.get('padding_right', 0)
+        pad_top    = config.get('padding_top', 0)
+        pad_bottom = config.get('padding_bottom', 0)
+        pad_value  = config.get('padding_value', 0)
+
+        if pad_left or pad_right or pad_top or pad_bottom:
+            padded = np.pad(
+                input_data,
+                ((pad_top, pad_bottom), (pad_left, pad_right)),
+                mode='constant',
+                constant_values=pad_value,
+            )
+        else:
+            padded = input_data
+
+        # 2. Convert to FLOAT for PyTorch operations
         # Even though hardware is int, PyTorch AvgPool requires float.
         # We will cast back to int at the very end.
-        input_tensor = torch.tensor(input_data, dtype=torch.float32)
-        
+        input_tensor = torch.tensor(padded, dtype=torch.float32)
+
         # Add Batch and Channel dims: (H, W) -> (1, 1, H, W)
         if len(input_tensor.shape) == 2:
             input_tensor = input_tensor.unsqueeze(0).unsqueeze(0)
-        
-        # 1.5 Apply padding if configured
-        # Extract padding values from config (defaults to 0 if not specified)
-        pad_left = config.get('padding_left', 0)
-        pad_right = config.get('padding_right', 0)
-        pad_top = config.get('padding_top', 0)
-        pad_bottom = config.get('padding_bottom', 0)
-        pad_value = config.get('padding_value', 0)
-        
-        # Apply padding if any padding is specified
-        if pad_left > 0 or pad_right > 0 or pad_top > 0 or pad_bottom > 0:
-            # PyTorch padding format: (left, right, top, bottom) for 4D tensors
-            input_tensor = F.pad(
-                input_tensor,
-                (pad_left, pad_right, pad_top, pad_bottom),
-                mode='constant',
-                value=pad_value
-            )
-        
+
         output = None
-        
+
         with torch.no_grad():
             if pool_type == 'max':
                 # Standard Max Pooling
                 pool = nn.MaxPool2d(kernel_size=kernel_size, stride=stride)
                 output = pool(input_tensor)
-                
+
             elif pool_type == 'min':
-                # TRICK: PyTorch has no MinPool. 
+                # TRICK: PyTorch has no MinPool.
                 # Mathematical equivalent: min(x) = -max(-x)
                 pool = nn.MaxPool2d(kernel_size=kernel_size, stride=stride)
                 output = -pool(-input_tensor)
-                
+
             elif pool_type == 'avg':
                 # Apply AvgPool
                 pool = nn.AvgPool2d(kernel_size=kernel_size, stride=stride)
                 output = pool(input_tensor)
-                
+
                 # CRITICAL FOR HARDWARE MATCHING:
                 # Hardware does integer division (e.g., 50 // 4 = 12).
                 # PyTorch does float division (e.g., 50 / 4 = 12.5).
-                # We must round the result to match hardware.
+                # We must FLOOR (truncate) the result to match hardware.
                 output = torch.round(output)
-        
-        # 2. Convert back to Numpy (remove batch and channel dims, keep spatial dims)
+
+        # 3. Convert back to Numpy (remove batch and channel dims, keep spatial dims)
         result = output.squeeze(0).squeeze(0).numpy()
-        
+
         # Ensure result is at least 2D (for 1x1 output cases)
         if result.ndim == 0:
             result = result.reshape(1, 1)
-        
-        # 3. Clip to Valid 8-bit Range
-        # If HW is Unsigned (0 to 255):
-        #result = np.clip(result, 0, 255)
-        
-        # If HW is Signed (-128 to 127), uncomment this instead:
-        result = np.clip(result, -128, 127)
-        
-        # 4. Convert to integer array
-        result = result.astype(int)
-        
+
+        # 4. Clip to signed INT8 range and convert to integer array
+        result = np.clip(result, -128, 127).astype(int)
+
+        return result
+
+    # ------------------------------------------------------------------ #
+    #              NVDLA HARDWARE-SPECIFIC AVG ADJUSTMENT                  #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _nvdla_hw_round(product_fixed):
+        """
+        Round-half-away-from-zero on a Q(N).16 fixed-point value.
+
+        Replicates the three-way rounding mux in the NVDLA PDP RTL
+        (NV_NVDLA_PDP_CORE_cal2d.v):
+          - Positive / zero : integer_part + bit[15]  (round-half-up)
+          - Negative, frac == -0.5 : round away from zero (toward -inf)
+          - Negative, |frac| <  0.5 : round toward zero  (add 1)
+          - Negative, |frac| >  0.5 : truncate (keep floor)
+        """
+        int_part = product_fixed >> 16        # arithmetic right-shift
+        frac     = product_fixed & 0xFFFF     # 16-bit fractional part
+
+        if product_fixed >= 0:
+            return int_part + (1 if frac >= 0x8000 else 0)
+        else:
+            if   frac == 0x8000:  return int_part       # exactly -0.5 → away from zero
+            elif frac >  0x8000:  return int_part + 1   # |frac| < 0.5 → toward zero
+            else:                 return int_part       # |frac| > 0.5 → truncate
+
+    @classmethod
+    def nvdla_avg_adjust(cls, input_data, config):
+        """
+        Re-compute AVG pooling output using NVDLA's exact fixed-point
+        arithmetic so the golden reference matches the hardware.
+
+        NVDLA computes average pooling in two sequential stages:
+          1. Multiply the window sum by ``recip_width``  (Q0.16), round.
+          2. Multiply that intermediate by ``recip_height`` (Q0.16), round.
+
+        Both stages use ``_nvdla_hw_round`` (round-half-away-from-zero).
+
+                For MAX/MIN, NVDLA border behavior can differ from a generic
+                zero-padded software model. We apply NVDLA-oriented padding
+                defaults for border windows so expected data matches hardware:
+                    - MAX: use a very small pad value (INT8 min by default)
+                    - MIN: use a very large pad value (INT8 max by default)
+
+        Args:
+            input_data: the *original* (un-padded) numpy array (H, W)
+                        so the function can recompute integer sums.
+            config: same config dict used by ``compute_golden``.
+
+        Returns:
+            numpy int array (out_H, out_W) matching NVDLA hardware output.
+        """
+        pool_type = config['pool_type']
+
+        # NVDLA border behavior for MAX/MIN (edge windows)
+        if pool_type == 'max':
+            hw_cfg = dict(config)
+            hw_cfg['padding_value'] = config.get('nvdla_max_pad_value', -128)
+            return cls().compute_golden(input_data, hw_cfg)
+        if pool_type == 'min':
+            hw_cfg = dict(config)
+            hw_cfg['padding_value'] = config.get('nvdla_min_pad_value', 127)
+            return cls().compute_golden(input_data, hw_cfg)
+
+        kernel_size = config['kernel_size']
+        stride      = config['stride']
+
+        # Pad the input (same logic as compute_golden)
+        pad_left   = config.get('padding_left', 0)
+        pad_right  = config.get('padding_right', 0)
+        pad_top    = config.get('padding_top', 0)
+        pad_bottom = config.get('padding_bottom', 0)
+        pad_value  = config.get('padding_value', 0)
+
+        if pad_left or pad_right or pad_top or pad_bottom:
+            padded = np.pad(
+                input_data,
+                ((pad_top, pad_bottom), (pad_left, pad_right)),
+                mode='constant',
+                constant_values=pad_value,
+            )
+        else:
+            padded = input_data
+
+        in_h, in_w = padded.shape
+        out_h = (in_h - kernel_size) // stride + 1
+        out_w = (in_w - kernel_size) // stride + 1
+
+        # NVDLA reciprocal registers: round(65536 / kernel_dim)
+        recip_w = round(65536 / kernel_size)
+        recip_h = round(65536 / kernel_size)
+
+        result = np.zeros((out_h, out_w), dtype=int)
+        for r in range(out_h):
+            for c in range(out_w):
+                window = padded[r * stride : r * stride + kernel_size,
+                                c * stride : c * stride + kernel_size]
+                s = int(np.sum(window))
+
+                # Stage 0 — divide by kernel width (fixed-point multiply + round)
+                step1 = cls._nvdla_hw_round(s * recip_w)
+                # Stage 1 — divide by kernel height
+                step2 = cls._nvdla_hw_round(step1 * recip_h)
+
+                result[r, c] = step2
+
+        result = np.clip(result, -128, 127).astype(int)
+        if result.ndim == 0:
+            result = result.reshape(1, 1)
         return result

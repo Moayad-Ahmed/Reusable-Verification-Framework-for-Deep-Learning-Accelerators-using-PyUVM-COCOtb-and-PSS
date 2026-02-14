@@ -120,12 +120,35 @@ class NvdlaBFM(metaclass=utility_classes.Singleton):
 
         await RisingEdge(self.dut.dla_core_clk)
 
-    async def read_from_dram(self, base_addr: int, output_length: int):
+    async def read_from_dram(self, base_addr: int, num_pixels: int,
+                              pixel_bytes: int = 8,
+                              data_bytes_per_pixel: int = 1):
+        """
+        Read output data from DRAM, extracting all channel bytes per pixel.
+
+        NVDLA stores each spatial pixel in ``pixel_bytes`` (atom-aligned).
+        The first ``data_bytes_per_pixel`` bytes of each pixel contain
+        actual channel data; the rest is padding.
+
+        Args:
+            base_addr:            DRAM start address of the output surface.
+            num_pixels:           Number of spatial output pixels to read.
+            pixel_bytes:          Total bytes per pixel in memory (atom-aligned,
+                                  e.g. 8 for 1-ch INT8, 16 for 10-ch INT8).
+            data_bytes_per_pixel: Number of real data bytes per pixel
+                                  (= channels × bytes_per_element).
+
+        Returns:
+            list[int]: Flat list of data bytes across all pixels / channels,
+                       in pixel-major, channel-minor order.
+        """
         actual_output = []
 
-        for i in range(output_length):
-            data = await self.axi_master.read_byte(base_addr + i)
-            actual_output.append(data)
+        for i in range(num_pixels):
+            pixel_addr = base_addr + i * pixel_bytes
+            for ch in range(data_bytes_per_pixel):
+                data = await self.axi_master.read_byte(pixel_addr + ch)
+                actual_output.append(data)
 
         await RisingEdge(self.dut.dla_core_clk)
 
