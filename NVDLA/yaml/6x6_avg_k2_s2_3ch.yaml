@@ -11,7 +11,7 @@ test_suite:
           stride: 2
           pool_type: "avg"
 
-          input_shape: [6, 6, 3]  # [height, width, channels] - 3 channels
+          input_shape: [6, 6, 2]  # [height, width, channels] - 3 channels
           data_range: [-128, 127]
 
           padding_left: 0
