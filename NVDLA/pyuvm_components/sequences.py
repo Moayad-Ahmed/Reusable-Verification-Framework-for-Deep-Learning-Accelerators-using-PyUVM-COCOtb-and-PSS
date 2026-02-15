@@ -4,7 +4,6 @@ import numpy as np
 import os
 import yaml
 from strategy.regs_configs import RegistrationConfigs
-from strategy.pooling_strategy import PoolingStrategy
 from strategy.Layer_Factory import LayerFactory
 from utils.nvdla_utils import NvdlaBFM
 
@@ -14,12 +13,12 @@ class PdpTestSequence(uvm_sequence):
     ATOM = 8
     # Bytes-per-element lookup by data format
     BPE_MAP = {'INT8': 1, 'INT16': 2, 'FP16': 2}
+    ITERATIONS = 2
 
     def __init__(self, name, input_file=None, config_file=None):
         super().__init__(name)
         self.input_file = input_file
         self.config_file = config_file
-        self.pooling_strategy = PoolingStrategy()
 
     @classmethod
     def compute_pixel_layout(cls, config):
@@ -52,7 +51,6 @@ class PdpTestSequence(uvm_sequence):
         """
         bpe, pixel_bytes = self.compute_pixel_layout(config)
         input_shape = config['input_shape']
-        channels = input_shape[2] if len(input_shape) == 3 else 1
         
         if len(input_shape) == 3:
             h, w, c = input_shape
@@ -91,6 +89,15 @@ class PdpTestSequence(uvm_sequence):
                         for _ in range(pixel_bytes - bytes_written):
                             f.write("00\n")
 
+    @classmethod
+    def get_numpy_dtype(cls, config):
+        data_format = config.get('data_format', 'INT8')
+        if data_format in ('INT16'):
+            return np.int16
+        elif data_format in ('FP16'):
+            return np.float16
+        return np.int8
+
     def load_yaml_config(self):
         """Load and parse the YAML configuration file"""
         if not self.config_file or not os.path.exists(self.config_file):
@@ -115,21 +122,28 @@ class PdpTestSequence(uvm_sequence):
 
     async def body(self):
         strategy = LayerFactory.create_strategy('pooling')
+        reg_cfg = RegistrationConfigs()
         # Load YAML configuration
         config = self.load_yaml_config()
         bfm = NvdlaBFM()
+        np_dtype = self.get_numpy_dtype(config)
+        _, pixel_bytes = self.compute_pixel_layout(config)
 
-        for i in range(2):
+        input_shape = config['input_shape']
+        channels = input_shape[2] if len(input_shape) == 3 else 1
+        num_spatial_pixels = input_shape[0] * input_shape[1]  # H × W
+        input_total_bytes = num_spatial_pixels * pixel_bytes
+
+        for i in range(self.ITERATIONS):
             seq_item = PdpTransaction("pdp_tx", strategy)
 
             # Generate input data
             input_data = strategy.generate_input_data(config)
-            # Compute generic golden output, then adapt for NVDLA hardware
-            generic_output = strategy.compute_golden(input_data, config)
-            expected_output = strategy.nvdla_avg_adjust(input_data, config)
+            # Compute golden output adapted for NVDLA hardware
+            expected_output = strategy.nvdla_pool_adjust(input_data, config)
             
             # Flatten to 1D byte array - convert from CHW (model format) to HWC (NVDLA memory layout)
-            input_bytes = input_data.flatten().astype(np.int8).tolist()
+            input_bytes = input_data.flatten().astype(np_dtype).tolist()
             
             # Convert expected output from CHW to HWC memory layout (pixel-by-pixel with all channels)
             input_shape = config['input_shape']
@@ -140,10 +154,10 @@ class PdpTestSequence(uvm_sequence):
                 c, h, w = expected_output.shape
                 # Transpose from (C, H, W) to (H, W, C) then flatten
                 expected_hwc = np.transpose(expected_output, (1, 2, 0))  # Now (H, W, C)
-                expected_bytes = expected_hwc.flatten().astype(np.int8).tolist()
+                expected_bytes = expected_hwc.flatten().astype(np_dtype).tolist()
             else:
                 # Single channel: keep as-is
-                expected_bytes = expected_output.flatten().astype(np.int8).tolist()
+                expected_bytes = expected_output.flatten().astype(np_dtype).tolist()
 
             # Debug prints
             print(f"\n=== Iteration {i} ===")
@@ -152,12 +166,6 @@ class PdpTestSequence(uvm_sequence):
 
             # Write input data to file
             self.write_input_data_to_file(input_bytes, config)
-
-            # ----- Atom-aligned layout -----
-            _, pixel_bytes = self.compute_pixel_layout(config)
-            input_shape = config['input_shape']
-            num_spatial_pixels = input_shape[0] * input_shape[1]  # H × W
-            input_total_bytes = num_spatial_pixels * pixel_bytes
 
             # ----- Input DRAM data -----
             seq_item.input_file = self.input_file
@@ -169,12 +177,10 @@ class PdpTestSequence(uvm_sequence):
             seq_item.output_base_addr  = max(0x100, ((input_total_bytes + 255) // 256) * 256)
 
             # ----- PDP + PDP-RDMA register writes -----
-            seq_item.reg_configs = RegistrationConfigs().pooling_configs(config, src_addr=seq_item.input_base_addr, dst_addr=seq_item.output_base_addr)
+            seq_item.reg_configs = reg_cfg.pooling_configs(config, src_addr=seq_item.input_base_addr, dst_addr=seq_item.output_base_addr)
 
             # ----- Expected output info (from golden model) -----
-            bpe, pixel_bytes = self.compute_pixel_layout(config)
-            input_shape = config['input_shape']
-            channels = input_shape[2] if len(input_shape) == 3 else 1
+            bpe, _ = self.compute_pixel_layout(config)
             
             # Handle both 2D (H, W) and 3D (C, H, W) output shapes
             if expected_output.ndim == 2:

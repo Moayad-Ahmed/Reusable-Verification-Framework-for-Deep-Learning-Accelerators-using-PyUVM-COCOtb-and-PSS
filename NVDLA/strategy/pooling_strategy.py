@@ -241,7 +241,7 @@ class PoolingStrategy(LayerStrategy):
             else:                 return int_part       # |frac| > 0.5 → truncate
 
     @classmethod
-    def nvdla_avg_adjust(cls, input_data, config):
+    def nvdla_pool_adjust(cls, input_data, config):
         """
         Re-compute AVG pooling output using NVDLA's exact fixed-point
         arithmetic so the golden reference matches the hardware.
