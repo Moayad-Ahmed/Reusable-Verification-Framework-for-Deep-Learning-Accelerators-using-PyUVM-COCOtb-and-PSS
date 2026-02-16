@@ -1,5 +1,5 @@
 from pyuvm import *
-from pyuvm_components.seq_item import PdpTransaction
+from pyuvm_components.seq_item import PdpTransaction, ConvTransaction
 import numpy as np
 import os
 import yaml
@@ -103,7 +103,7 @@ class PdpTestSequence(uvm_sequence):
         if not self.config_file or not os.path.exists(self.config_file):
             raise FileNotFoundError(f"Config file not found: {self.config_file}")
         
-        with open(self.config_file, 'r') as f:
+        with open(self.config_file, 'r', encoding='utf-8') as f:
             yaml_data = yaml.safe_load(f)
         
         # Extract the first test case and first layer config
@@ -200,3 +200,171 @@ class PdpTestSequence(uvm_sequence):
 
             await bfm.iteration_done_queue.get()
             print(f"Iteration {i} checked by scoreboard.")
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  CONVOLUTION TEST SEQUENCE
+# ══════════════════════════════════════════════════════════════════════
+
+class ConvTestSequence(uvm_sequence):
+    """
+    UVM sequence for NVDLA convolution (DC, INT8, SDP passthrough).
+
+    Generates random input + weight data, computes the golden model,
+    formats the weight memory for nv_small, writes .dat files for the
+    driver, and builds the full register-config list including the CBUF
+    poll and bottom-up enable order.
+    """
+    ATOM   = 8
+    BPE    = 1          # INT8
+    ITERATIONS = 1
+
+    def __init__(self, name, input_file=None, weight_file=None, config_file=None):
+        super().__init__(name)
+        self.input_file  = input_file
+        self.weight_file = weight_file
+        self.config_file = config_file
+
+    # ── helpers ────────────────────────────────────────────────────────
+
+    def _write_hex_file(self, path, byte_list):
+        """Write a flat list of unsigned byte values as hex lines."""
+        with open(path, 'w') as f:
+            for b in byte_list:
+                f.write(f"{b & 0xFF:02x}\n")
+
+    def _input_to_hwc_bytes(self, input_data, config):
+        """
+        Convert CHW int8 array → flat HWC byte list, atom-padded per pixel.
+        """
+        C, H, W = input_data.shape
+        atoms = max(1, (C * self.BPE + self.ATOM - 1) // self.ATOM)
+        pixel_bytes = atoms * self.ATOM
+        buf = []
+        for h in range(H):
+            for w in range(W):
+                for c in range(C):
+                    buf.append(int(input_data[c, h, w]) & 0xFF)
+                buf.extend([0] * (pixel_bytes - C * self.BPE))
+        return buf, pixel_bytes
+
+    def load_yaml_config(self):
+        if not self.config_file or not os.path.exists(self.config_file):
+            raise FileNotFoundError(f"Config file not found: {self.config_file}")
+        with open(self.config_file, 'r', encoding='utf-8') as f:
+            yaml_data = yaml.safe_load(f)
+        test_suite = yaml_data.get('test_suite', [])
+        if not test_suite:
+            raise ValueError("No test suite found in YAML config")
+        first_test = test_suite[0]
+        layers = first_test.get('layers', [])
+        if not layers:
+            raise ValueError("No layers found in test configuration")
+        return layers[0].get('config', {})
+
+    # ── main body ─────────────────────────────────────────────────────
+
+    async def body(self):
+        strategy = LayerFactory.create_strategy('convolution')
+        reg_cfg  = RegistrationConfigs()
+        config   = self.load_yaml_config()
+        bfm      = NvdlaBFM()
+
+        # --- extract dimensions ---
+        input_shape = config['input_shape']
+        if len(input_shape) == 3:
+            in_h, in_w, num_ch = input_shape
+        else:
+            in_h, in_w = input_shape
+            num_ch = config.get('num_channels', 1)
+        # Ensure num_channels is in config
+        config.setdefault('num_channels', num_ch)
+
+        num_kernels = config['num_kernels']
+        kh = config.get('kernel_h', 1)
+        kw = config.get('kernel_w', 1)
+        clip_truncate = config.get('clip_truncate', 0)
+        stride_h = config.get('stride_h', 1)
+        stride_w = config.get('stride_w', 1)
+        pad_l = config.get('padding_left', 0)
+        pad_t = config.get('padding_top', 0)
+        dil_x = config.get('dilation_x', 1)
+        dil_y = config.get('dilation_y', 1)
+
+        eff_kh = (kh - 1) * dil_y + 1
+        eff_kw = (kw - 1) * dil_x + 1
+        out_h = (in_h + pad_t * 2 - eff_kh) // stride_h + 1
+        out_w = (in_w + pad_l * 2 - eff_kw) // stride_w + 1
+
+        # --- memory layout ---
+        in_atoms  = max(1, (num_ch * self.BPE + self.ATOM - 1) // self.ATOM)
+        in_pixel  = in_atoms * self.ATOM
+        in_total  = in_h * in_w * in_pixel
+
+        out_atoms = max(1, (num_kernels * self.BPE + self.ATOM - 1) // self.ATOM)
+        out_pixel = out_atoms * self.ATOM
+
+        # DRAM address plan
+        input_base  = 0
+        weight_base = max(0x100, ((in_total + 255) // 256) * 256)
+        # weight size (same formula as in regs_configs)
+        nkg = (num_kernels + 7) // 8
+        ncg = (num_ch + 7) // 8
+        wt_raw = nkg * kh * kw * ncg * 8 * 8
+        wt_size = max(128, ((wt_raw + 127) // 128) * 128)
+        output_base = max(weight_base + 0x100,
+                          ((weight_base + wt_size + 255) // 256) * 256)
+
+        for i in range(self.ITERATIONS):
+            seq_item = ConvTransaction("conv_tx", strategy)
+
+            # ---- generate data ----
+            input_data  = strategy.generate_input_data(config)
+            weight_data = strategy.generate_weight_data(config)
+            expected    = strategy.compute_golden(input_data, config, weight_data)
+
+            # ---- write input .dat ----
+            input_bytes, _ = self._input_to_hwc_bytes(input_data, config)
+            self._write_hex_file(self.input_file, input_bytes)
+
+            # ---- write weight .dat (NVDLA format) ----
+            weight_bytes = strategy.format_weights_for_nvdla(weight_data)
+            self._write_hex_file(self.weight_file, weight_bytes)
+
+            # ---- expected output → HWC flat bytes ----
+            K, OH, OW = expected.shape
+            expected_list = []
+            for oh in range(OH):
+                for ow in range(OW):
+                    for k in range(K):
+                        expected_list.append(int(expected[k, oh, ow]) & 0xFF)
+
+            # ---- populate transaction ----
+            seq_item.input_file      = self.input_file
+            seq_item.input_base_addr = input_base
+            seq_item.weight_file      = self.weight_file
+            seq_item.weight_base_addr = weight_base
+            seq_item.output_base_addr = output_base
+            seq_item.output_num_pixels = out_h * out_w
+            seq_item.output_pixel_bytes = out_pixel
+            seq_item.output_data_bytes_per_pixel = num_kernels * self.BPE
+            seq_item.expected_output_data = expected_list
+
+            seq_item.reg_configs = reg_cfg.conv_configs(
+                config,
+                input_addr  = input_base,
+                weight_addr = weight_base,
+                output_addr = output_base,
+            )
+
+            # ---- debug prints ----
+            print(f"\n=== Conv Iteration {i} ===")
+            print(f"Input shape: {input_data.shape}  Weight shape: {weight_data.shape}")
+            print(f"Expected output shape: {expected.shape}")
+            print(f"Expected bytes: {expected_list}")
+            print(f"DRAM: input@0x{input_base:x}  wt@0x{weight_base:x}  out@0x{output_base:x}")
+
+            await self.start_item(seq_item)
+            await self.finish_item(seq_item)
+            await bfm.iteration_done_queue.get()
+            print(f"Conv iteration {i} checked by scoreboard.")

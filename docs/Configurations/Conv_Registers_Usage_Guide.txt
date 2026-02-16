@@ -1,0 +1,1673 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║       NVDLA CONVOLUTION PIPELINE REGISTERS - PRACTICAL USAGE GUIDE           ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+This document provides comprehensive usage instructions for all registers in
+the NVDLA convolution pipeline: CDMA, CSC, CMAC_A, CMAC_B, and CACC.
+Includes bit fields, enumeration values, and practical programming examples.
+
+PIPELINE OVERVIEW:
+  CDMA  → Fetches input data + weights from DRAM/SRAM into CBUF (conv buffer)
+  CSC   → Reads CBUF, sequences data/weights, feeds to MAC arrays
+  CMAC  → Two identical MAC arrays (A & B) perform multiply-accumulate
+  CACC  → Accumulates partial sums across channels, truncates, sends to SDP
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                 1. CDMA MODULE - CONVOLUTION DMA (Base: 0x3000)
+═══════════════════════════════════════════════════════════════════════════════
+
+The CDMA is the largest module. It handles all memory access for the
+convolution pipeline — fetching input activation data and weight data
+from external memory (MCIF) or on-chip SRAM (CVIF) into the shared
+Convolution Buffer (CBUF).
+
+──────────────────────────────────────────────────────────────────────────────
+                          CDMA SYSTEM REGISTERS
+──────────────────────────────────────────────────────────────────────────────
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 1. S_STATUS (0x3000 / 0x0C00)                                    [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Status of both register groups (Group 0 and Group 1)               │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [1:0]   STATUS_0  - Group 0 status                                        │
+│   [17:16] STATUS_1  - Group 1 status                                        │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = IDLE     - Ready for new configuration                              │
+│   0x1 = RUNNING  - Currently executing DMA operations                       │
+│   0x2 = PENDING  - Configured and waiting to execute                        │
+│                                                                              │
+│ USAGE:                                                                       │
+│   status = read_reg(CDMA_S_STATUS);                                         │
+│   group0_status = status & 0x3;                                             │
+│   group1_status = (status >> 16) & 0x3;                                     │
+│   if (group0_status == 0x0) { /* safe to configure group 0 */ }            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 2. S_POINTER (0x3004 / 0x0C01)                                   [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Selects which register group software writes to (ping-pong)        │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0]  PRODUCER - Which group SW configures (RW)                            │
+│   [16] CONSUMER - Which group HW is using (RO)                              │
+│                                                                              │
+│ VALUES:                                                                      │
+│   PRODUCER: 0 = GROUP_0,  1 = GROUP_1                                        │
+│   CONSUMER: 0 = GROUP_0,  1 = GROUP_1                                        │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_S_POINTER, 0x0);  // Select Group 0 for config            │
+│   // IMPORTANT: Must match S_POINTER on CSC, CMAC_A, CMAC_B, CACC          │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 3. S_ARBITER (0x3008 / 0x0C02)                                   [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: DMA bus arbitration weights between data and WMB channels          │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [3:0]   ARB_WEIGHT - Arbitration weight for weight channel (reset=0xF)    │
+│   [19:16] ARB_WMB    - Arbitration weight for WMB channel (reset=0x3)       │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 to 0xF (higher = more bandwidth priority)                             │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_S_ARBITER, 0x000F000F);  // Equal priority                │
+│   // Typically use defaults unless tuning DMA bandwidth                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 4. S_CBUF_FLUSH_STATUS (0x300C / 0x0C03)                         [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Indicates if CBUF flush has completed                              │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] FLUSH_DONE - CBUF flush completion flag                               │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = Not done / not requested                                            │
+│   0x1 = Flush completed                                                     │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // Check after requesting CBUF flush before next layer                    │
+│   while (!(read_reg(CDMA_S_CBUF_FLUSH_STATUS) & 0x1));                      │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+──────────────────────────────────────────────────────────────────────────────
+                     CDMA DATA-GROUP REGISTERS (D_*)
+──────────────────────────────────────────────────────────────────────────────
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 5. D_OP_ENABLE (0x3010 / 0x0C04)                                 [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Trigger to start CDMA operation                                    │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] OP_EN - Operation enable                                              │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = DISABLE                                                             │
+│   0x1 = ENABLE  - Start DMA (write this LAST after all D_* config)          │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // Configure ALL other D_* registers first, then:                         │
+│   write_reg(CDMA_D_OP_ENABLE, 0x1);  // Start DMA fetch                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 6. D_MISC_CFG (0x3014 / 0x0C05)                                  [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Core convolution configuration — mode, precision, reuse flags      │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0]     CONV_MODE      - Convolution algorithm                            │
+│   [9:8]   IN_PRECISION   - Input data precision                             │
+│   [13:12] PROC_PRECISION - Processing precision                             │
+│   [16]    DATA_REUSE     - Reuse input data from previous layer             │
+│   [20]    WEIGHT_REUSE   - Reuse weights from previous layer                │
+│   [24]    SKIP_DATA_RLS  - Skip releasing data entries in CBUF              │
+│   [28]    SKIP_WEIGHT_RLS- Skip releasing weight entries in CBUF            │
+│                                                                              │
+│ CONV_MODE:                                                                  │
+│   0x0 = DIRECT   - Direct convolution (standard)                            │
+│   0x1 = WINOGRAD - Winograd transform (only for 3×3 kernels)               │
+│                                                                              │
+│ IN_PRECISION / PROC_PRECISION:                                              │
+│   0x0 = INT8   - 8-bit integer                                              │
+│   0x1 = INT16  - 16-bit integer                                             │
+│   0x2 = FP16   - Half-precision float                                       │
+│                                                                              │
+│ DATA_REUSE / WEIGHT_REUSE:                                                  │
+│   0x0 = DISABLE - Fetch fresh data/weights from memory                      │
+│   0x1 = ENABLE  - Reuse data/weights already in CBUF from previous op       │
+│                                                                              │
+│ SKIP_DATA_RLS / SKIP_WEIGHT_RLS:                                            │
+│   0x0 = DISABLE - Normal: release CBUF entries after use                    │
+│   0x1 = ENABLE  - Don't release (for next layer's reuse)                    │
+│                                                                              │
+│ USAGE EXAMPLES:                                                              │
+│   // Direct conv, INT8 in, INT8 proc, no reuse:                            │
+│   write_reg(CDMA_D_MISC_CFG, 0x00000000);                                  │
+│                                                                              │
+│   // Direct conv, FP16 in, FP16 proc:                                       │
+│   write_reg(CDMA_D_MISC_CFG, 0x00002200);                                  │
+│                                                                              │
+│   // Direct conv, INT8, reuse weights, skip weight release:                 │
+│   write_reg(CDMA_D_MISC_CFG, 0x10100000);                                  │
+│                                                                              │
+│   // Winograd, INT16 in, INT16 proc:                                        │
+│   write_reg(CDMA_D_MISC_CFG, 0x00001101);                                  │
+│                                                                              │
+│ CRITICAL: Must match D_MISC_CFG across CSC, CMAC_A, CMAC_B, CACC           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 7. D_DATAIN_FORMAT (0x3018 / 0x0C06)                              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Input data format — feature map or raw pixel image                 │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0]     DATAIN_FORMAT      - Input type                                   │
+│   [13:8]  PIXEL_FORMAT       - Pixel encoding format (if pixel mode)        │
+│   [16]    PIXEL_MAPPING      - Memory layout for pixels                     │
+│   [20]    PIXEL_SIGN_OVERRIDE - Override pixel sign interpretation          │
+│                                                                              │
+│ DATAIN_FORMAT:                                                              │
+│   0x0 = FEATURE - Feature map input (most common for hidden layers)         │
+│   0x1 = PIXEL   - Raw image input (first layer of network)                  │
+│                                                                              │
+│ PIXEL_FORMAT (6-bit, only when DATAIN_FORMAT=PIXEL):                        │
+│   0x00 = T_R8                0x0C = T_A8B8G8R8                              │
+│   0x01 = T_R10               0x0D = T_A8R8G8B8                              │
+│   0x02 = T_R12               0x0E = T_B8G8R8A8                              │
+│   0x03 = T_R16               0x0F = T_R8G8B8A8                              │
+│   0x04 = T_R16_I             0x10 = T_X8B8G8R8                              │
+│   0x05 = T_R16_F             0x11 = T_X8R8G8B8                              │
+│   0x06 = T_A16B16G16R16      0x12 = T_B8G8R8X8                              │
+│   0x07 = T_X16B16G16R16      0x13 = T_R8G8B8X8                              │
+│   0x08 = T_A16B16G16R16_F    0x14 = T_A2B10G10R10                           │
+│   0x09 = T_A16Y16U16V16      0x15 = T_A2R10G10B10                           │
+│   0x0A = T_V16U16Y16A16      0x16 = T_B10G10R10A2                           │
+│   0x0B = T_A16Y16U16V16_F    0x17 = T_R10G10B10A2                           │
+│   0x18 = T_A2Y10U10V10       0x1C = T_Y8___U8V8_N444                        │
+│   0x19 = T_V10U10Y10A2       0x1D = T_Y8___V8U8_N444                        │
+│   0x1A = T_A8Y8U8V8          0x1E = T_Y10___U10V10_N444                     │
+│   0x1B = T_V8U8Y8A8          0x1F = T_Y10___V10U10_N444                     │
+│   0x20 = T_Y12___U12V12_N444 0x21 = T_Y12___V12U12_N444                     │
+│   0x22 = T_Y16___U16V16_N444 0x23 = T_Y16___V16U16_N444                     │
+│                                                                              │
+│ PIXEL_MAPPING:                                                              │
+│   0x0 = PITCH_LINEAR    - Standard row-major layout                         │
+│   0x1 = RESERVED_LINEAR - Reserved                                          │
+│                                                                              │
+│ PIXEL_SIGN_OVERRIDE:                                                        │
+│   0x0 = UNSIGNED_INT - Treat pixel values as unsigned                       │
+│   0x1 = SIGNED_INT   - Treat pixel values as signed                         │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // Feature map input (hidden layers):                                     │
+│   write_reg(CDMA_D_DATAIN_FORMAT, 0x00000000);                              │
+│                                                                              │
+│   // ARGB 8-bit pixel input (first layer):                                  │
+│   write_reg(CDMA_D_DATAIN_FORMAT, 0x00000C01);                              │
+│   // DATAIN_FORMAT=PIXEL(1), PIXEL_FORMAT=T_A8B8G8R8(0x0C)                 │
+│                                                                              │
+│ CRITICAL: CSC D_DATAIN_FORMAT must match (Feature/Pixel field)              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 8. D_DATAIN_SIZE_0 (0x301C / 0x0C07)                             [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Input data cube width and height                                   │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [12:0]  DATAIN_WIDTH  - Input width - 1                                   │
+│   [28:16] DATAIN_HEIGHT - Input height - 1                                  │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0 to 8191 each (represents 1 to 8192, value+1 encoding)                   │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // 224×224 input:                                                         │
+│   write_reg(CDMA_D_DATAIN_SIZE_0, (223 << 16) | 223);  // 0x00DF00DF       │
+│                                                                              │
+│   // 56×56 input:                                                           │
+│   write_reg(CDMA_D_DATAIN_SIZE_0, (55 << 16) | 55);    // 0x00370037       │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 9. D_DATAIN_SIZE_1 (0x3020 / 0x0C08)                             [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Input data cube channel count                                      │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [12:0] DATAIN_CHANNEL - Input channels - 1                                │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_DATAIN_SIZE_1, 63);   // 64 channels                    │
+│   write_reg(CDMA_D_DATAIN_SIZE_1, 2);    // 3 channels (RGB)               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 10. D_DATAIN_SIZE_EXT_0 (0x3024 / 0x0C09)                        [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Extended input dimensions (Winograd mode only)                     │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [12:0]  DATAIN_WIDTH_EXT  - Extended width - 1                            │
+│   [28:16] DATAIN_HEIGHT_EXT - Extended height - 1                           │
+│                                                                              │
+│ FORMULA (Winograd):                                                         │
+│   WIDTH_EXT  = (PAD_LEFT+PAD_RIGHT+DATAIN_WIDTH+1)/(CONV_X_STRIDE+1) - 1   │
+│   HEIGHT_EXT = (PAD_TOP+PAD_BOTTOM+DATAIN_HEIGHT+1)/(CONV_Y_STRIDE+1) - 1  │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // For Winograd on 224×224 with pad=1, stride=1:                          │
+│   // ext_w = (1+1+224)/1 - 1 = 225; ext_h same                             │
+│   write_reg(CDMA_D_DATAIN_SIZE_EXT_0, (225 << 16) | 225);                  │
+│   // For direct convolution, set to same value as D_DATAIN_SIZE_0           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 11. D_PIXEL_OFFSET (0x3028 / 0x0C0A)                             [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Pixel horizontal and vertical offset (pixel input mode only)       │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [4:0]   PIXEL_X_OFFSET - Horizontal offset (0-31)                        │
+│   [18:16] PIXEL_Y_OFFSET - Vertical offset (0-7)                           │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_PIXEL_OFFSET, 0x00000000);  // No offset (typical)      │
+│   // Only relevant when DATAIN_FORMAT = PIXEL                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 12. D_DAIN_RAM_TYPE (0x302C / 0x0C0B)                             [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Source memory interface for input data                             │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] DATAIN_RAM_TYPE                                                       │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = CVIF - Read from on-chip SRAM (CVRAM, faster)                       │
+│   0x1 = MCIF - Read from external DRAM (typical)                            │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_DAIN_RAM_TYPE, 0x1);  // Read data from DRAM            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 13-16. D_DAIN_ADDR_HIGH/LOW_0/1                                  [READ/WRITE]│
+│        (0x3030-0x303C / 0x0C0C-0x0C0F)                                       │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: 64-bit addresses for input data planes                             │
+│                                                                              │
+│ D_DAIN_ADDR_HIGH_0 (0x3030) [31:0] - Y/RGB plane, bits [63:32]             │
+│ D_DAIN_ADDR_LOW_0  (0x3034) [31:0] - Y/RGB plane, bits [31:0]              │
+│ D_DAIN_ADDR_HIGH_1 (0x3038) [31:0] - UV plane, bits [63:32]                │
+│ D_DAIN_ADDR_LOW_1  (0x303C) [31:0] - UV plane, bits [31:0]                 │
+│                                                                              │
+│ NOTE: ADDR_HIGH/LOW_1 only used for semi-planar YUV pixel formats           │
+│                                                                              │
+│ USAGE:                                                                       │
+│   uint64_t data_addr = 0x80000000;                                          │
+│   write_reg(CDMA_D_DAIN_ADDR_HIGH_0, data_addr >> 32);                     │
+│   write_reg(CDMA_D_DAIN_ADDR_LOW_0,  data_addr & 0xFFFFFFFF);              │
+│   // ADDR_1 only for YUV semi-planar formats                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 17-19. D_LINE_STRIDE, D_LINE_UV_STRIDE, D_SURF_STRIDE            [READ/WRITE]│
+│        (0x3040-0x3048 / 0x0C10-0x0C12)                                       │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Memory stride configuration for input data                         │
+│                                                                              │
+│ BIT LAYOUT: [31:0] stride in bytes                                          │
+│                                                                              │
+│ D_LINE_STRIDE    (0x3040) - Bytes between consecutive lines                 │
+│ D_LINE_UV_STRIDE (0x3044) - UV plane line stride (semi-planar only)         │
+│ D_SURF_STRIDE    (0x3048) - Bytes between consecutive surfaces/channels     │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // 224×224×64, INT8, feature format:                                      │
+│   write_reg(CDMA_D_LINE_STRIDE, 224);        // width * 1 byte             │
+│   write_reg(CDMA_D_SURF_STRIDE, 224 * 224);  // width * height * 1 byte    │
+│                                                                              │
+│   // 224×224×3, FP16, pixel format:                                         │
+│   write_reg(CDMA_D_LINE_STRIDE, 224 * 3 * 2);  // width * ch * 2 bytes     │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 20. D_DAIN_MAP (0x304C / 0x0C13)                                 [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Memory packing mode for input data                                 │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0]  LINE_PACKED - Lines are tightly packed                               │
+│   [16] SURF_PACKED - Surfaces/channels tightly packed                       │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = FALSE - Not packed (use stride values)                              │
+│   0x1 = TRUE  - Tightly packed (stride = dimension size)                    │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_DAIN_MAP, 0x00010001);  // Both packed                  │
+│   write_reg(CDMA_D_DAIN_MAP, 0x00000000);  // Use stride registers          │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 21-22. D_RESERVED_X_CFG, D_RESERVED_Y_CFG                        [READ/WRITE]│
+│        (0x3050-0x3054 / 0x0C14-0x0C15)                                       │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Reserved registers — DO NOT TOUCH                                  │
+│                                                                              │
+│ D_RESERVED_X_CFG (0x3050):                                                  │
+│   [9:0]   RSV_PER_LINE    - Reserved per line                               │
+│   [25:16] RSV_PER_UV_LINE - Reserved per UV line                            │
+│                                                                              │
+│ D_RESERVED_Y_CFG (0x3054):                                                  │
+│   [2:0]   RSV_HEIGHT  - Reserved height                                     │
+│   [20:16] RSV_Y_INDEX - Reserved Y index                                    │
+│                                                                              │
+│ USAGE: Leave at 0x0 unless instructed otherwise                             │
+│   write_reg(CDMA_D_RESERVED_X_CFG, 0x0);                                   │
+│   write_reg(CDMA_D_RESERVED_Y_CFG, 0x0);                                   │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 23. D_BATCH_NUMBER (0x3058 / 0x0C16)                              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Number of batches to process in one operation                      │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [4:0] BATCHES - batch number - 1                                          │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0 to 31 (represents 1 to 32 batches)                                      │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_BATCH_NUMBER, 0);   // 1 batch (typical)                │
+│   write_reg(CDMA_D_BATCH_NUMBER, 7);   // 8 batches                        │
+│   // Must match CSC D_BATCH_NUMBER and CACC D_BATCH_NUMBER                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 24. D_BATCH_STRIDE (0x305C / 0x0C17)                              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Byte offset between consecutive batch images in memory             │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] BATCH_STRIDE - Stride in bytes                                     │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // For 224×224×3 INT8 images, batch stride = 224*224*3 = 150528           │
+│   write_reg(CDMA_D_BATCH_STRIDE, 150528);                                  │
+│   // Only meaningful when BATCHES > 0                                       │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 25. D_ENTRY_PER_SLICE (0x3060 / 0x0C18)                          [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Number of CBUF entries per input data slice                        │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [13:0] ENTRIES - entries per slice - 1                                    │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0 to 16383 (represents 1 to 16384 entries)                                │
+│   Each CBUF entry = 8 bytes (small config) or 32 bytes (large config)       │
+│                                                                              │
+│ FORMULA:                                                                    │
+│   entries_per_slice = ceil(width * channel * bytes_per_element / entry_size) │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_ENTRY_PER_SLICE, entries - 1);                           │
+│   // Must match CSC D_ENTRY_PER_SLICE exactly                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 26. D_FETCH_GRAIN (0x3064 / 0x0C19)                              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Number of input slices to fetch in one DMA grain                   │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [11:0] GRAINS - slices per grain - 1                                      │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_FETCH_GRAIN, 0);   // 1 slice per grain                 │
+│   write_reg(CDMA_D_FETCH_GRAIN, 3);   // 4 slices per grain                │
+│   // Affects DMA scheduling granularity vs CBUF utilization                 │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 27. D_WEIGHT_FORMAT (0x3068 / 0x0C1A)                             [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Weight data compression format                                     │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] WEIGHT_FORMAT                                                         │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = UNCOMPRESSED - Standard dense weight format                         │
+│   0x1 = COMPRESSED   - Sparse weight with WMB bitmask                       │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_WEIGHT_FORMAT, 0x0);  // Dense weights (typical)         │
+│   // If COMPRESSED: must also configure WMB addr/bytes and WGS addr         │
+│   // Must match CSC D_WEIGHT_FORMAT                                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 28. D_WEIGHT_SIZE_0 (0x306C / 0x0C1B)                             [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Bytes per single weight kernel                                     │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [17:0] BYTE_PER_KERNEL - bytes per kernel - 1                             │
+│                                                                              │
+│ VALUES: 0 to 262143 (represents 1 to 262144 bytes per kernel)               │
+│                                                                              │
+│ FORMULA:                                                                    │
+│   byte_per_kernel = kernel_w * kernel_h * channels * bytes_per_element      │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // 3×3 kernel, 64 input channels, INT8:                                   │
+│   // bytes = 3 * 3 * 64 * 1 = 576                                          │
+│   write_reg(CDMA_D_WEIGHT_SIZE_0, 575);                                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 29. D_WEIGHT_SIZE_1 (0x3070 / 0x0C1C)                             [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Total number of weight kernels (= output channels)                 │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [12:0] WEIGHT_KERNEL - kernel count - 1                                   │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_WEIGHT_SIZE_1, 127);  // 128 output channels             │
+│   write_reg(CDMA_D_WEIGHT_SIZE_1, 63);   // 64 output channels              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 30. D_WEIGHT_RAM_TYPE (0x3074 / 0x0C1D)                           [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Source memory for weight data                                      │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] WEIGHT_RAM_TYPE                                                       │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = CVIF - Weights in on-chip SRAM                                      │
+│   0x1 = MCIF - Weights in external DRAM (typical)                           │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_WEIGHT_RAM_TYPE, 0x1);  // Load from DRAM               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 31-32. D_WEIGHT_ADDR_HIGH/LOW (0x3078-0x307C / 0x0C1E-0x0C1F)    [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: 64-bit start address of weight data                                │
+│                                                                              │
+│ D_WEIGHT_ADDR_HIGH (0x3078) [31:0] - bits [63:32]                           │
+│ D_WEIGHT_ADDR_LOW  (0x307C) [31:0] - bits [31:0]                            │
+│                                                                              │
+│ USAGE:                                                                       │
+│   uint64_t wt_addr = 0x80100000;                                            │
+│   write_reg(CDMA_D_WEIGHT_ADDR_HIGH, wt_addr >> 32);                       │
+│   write_reg(CDMA_D_WEIGHT_ADDR_LOW,  wt_addr & 0xFFFFFFFF);                │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 33. D_WEIGHT_BYTES (0x3080 / 0x0C20)                              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Total bytes of all weight data                                     │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [24:0] WEIGHT_BYTES - Total bytes (max ~33MB)                             │
+│                                                                              │
+│ FORMULA:                                                                    │
+│   total = byte_per_kernel * num_kernels                                     │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // 128 kernels × 576 bytes each = 73728 bytes                            │
+│   write_reg(CDMA_D_WEIGHT_BYTES, 73728);                                   │
+│   // Must match CSC D_WEIGHT_BYTES                                          │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 34-35. D_WGS_ADDR_HIGH/LOW (0x3084-0x3088 / 0x0C21-0x0C22)      [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: 64-bit address of Weight Group Status data                         │
+│          Only used when WEIGHT_FORMAT = COMPRESSED                           │
+│                                                                              │
+│ WGS contains per-group metadata for compressed weight decoding.             │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_WGS_ADDR_HIGH, wgs_addr >> 32);                         │
+│   write_reg(CDMA_D_WGS_ADDR_LOW,  wgs_addr & 0xFFFFFFFF);                  │
+│   // Set to 0 for UNCOMPRESSED mode                                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 36-38. D_WMB_ADDR_HIGH/LOW, D_WMB_BYTES                          [READ/WRITE]│
+│        (0x308C-0x3094 / 0x0C23-0x0C25)                                       │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Weight Mask Bits address and size (compressed weights only)        │
+│                                                                              │
+│ D_WMB_ADDR_HIGH (0x308C) [31:0] - WMB address bits [63:32]                 │
+│ D_WMB_ADDR_LOW  (0x3090) [31:0] - WMB address bits [31:0]                  │
+│ D_WMB_BYTES     (0x3094) [20:0] - Total WMB bytes                          │
+│                                                                              │
+│ WMB = bitmask indicating which weight elements are non-zero                 │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_WMB_ADDR_HIGH, wmb_addr >> 32);                         │
+│   write_reg(CDMA_D_WMB_ADDR_LOW,  wmb_addr & 0xFFFFFFFF);                  │
+│   write_reg(CDMA_D_WMB_BYTES, wmb_total_bytes);                            │
+│   // Must match CSC D_WMB_BYTES                                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 39. D_MEAN_FORMAT (0x3098 / 0x0C26)                               [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Enable/disable mean subtraction on input data                      │
+│          Mean value is always signed integer                                 │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] MEAN_FORMAT                                                           │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = DISABLE - No mean subtraction                                       │
+│   0x1 = ENABLE  - Subtract global mean from each channel                    │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_MEAN_FORMAT, 0x1);  // Enable mean subtraction           │
+│   // Typically used for first layer (image input preprocessing)             │
+│   // Configure D_MEAN_GLOBAL_0/1 when enabled                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 40-41. D_MEAN_GLOBAL_0/1 (0x309C-0x30A0 / 0x0C27-0x0C28)        [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Per-channel global mean values for image preprocessing             │
+│                                                                              │
+│ D_MEAN_GLOBAL_0 (0x309C):                                                   │
+│   [15:0]  MEAN_RY - Mean for Red/Y channel (signed 16-bit)                  │
+│   [31:16] MEAN_GU - Mean for Green/U channel (signed 16-bit)               │
+│                                                                              │
+│ D_MEAN_GLOBAL_1 (0x30A0):                                                   │
+│   [15:0]  MEAN_BV - Mean for Blue/V channel (signed 16-bit)                 │
+│   [31:16] MEAN_AX - Mean for Alpha/X channel (signed 16-bit)               │
+│                                                                              │
+│ USAGE (ImageNet mean subtraction, INT8):                                    │
+│   // R=123, G=117, B=104 → subtract these means                            │
+│   write_reg(CDMA_D_MEAN_GLOBAL_0, (117 << 16) | 123);  // GU=117, RY=123  │
+│   write_reg(CDMA_D_MEAN_GLOBAL_1, (0   << 16) | 104);  // AX=0,   BV=104  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 42. D_CVT_CFG (0x30A4 / 0x0C29)                                  [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Data conversion configuration (for pixel input preprocessing)      │
+│          Applies: output = (input + offset) * scale >> truncate             │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0]   CVT_EN       - Enable conversion (0=DISABLE, 1=ENABLE)             │
+│   [9:4] CVT_TRUNCATE - Truncation bits after scaling (unsigned, 0-63)       │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_CVT_CFG, 0x00000001);  // Enable conversion, trunc=0    │
+│   write_reg(CDMA_D_CVT_CFG, 0x00000061);  // Enable, truncate=6 bits       │
+│   write_reg(CDMA_D_CVT_CFG, 0x00000000);  // Disable conversion            │
+│   // Only for pixel input mode. For feature input, disable.                 │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 43. D_CVT_OFFSET (0x30A8 / 0x0C2A)                               [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Offset added to input data before scaling (signed 16-bit)          │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [15:0] CVT_OFFSET - Signed 16-bit offset value                           │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_CVT_OFFSET, 0x0000);  // No offset                      │
+│   write_reg(CDMA_D_CVT_OFFSET, 0xFF80);  // Offset = -128 (signed)         │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 44. D_CVT_SCALE (0x30AC / 0x0C2B)                                [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Scale factor for input conversion (signed 16-bit)                  │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [15:0] CVT_SCALE - Signed 16-bit scale factor                            │
+│                                                                              │
+│ FORMULA:                                                                    │
+│   output = (input + CVT_OFFSET) * CVT_SCALE >> CVT_TRUNCATE                │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_CVT_SCALE, 1);  // Scale by 1 (identity)                │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 45. D_CONV_STRIDE (0x30B0 / 0x0C2C)                              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Convolution stride in X and Y directions                           │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [2:0]   CONV_X_STRIDE - Horizontal stride - 1                            │
+│   [18:16] CONV_Y_STRIDE - Vertical stride - 1                              │
+│                                                                              │
+│ VALUES: 0 to 7 (represents stride 1 to 8)                                   │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_CONV_STRIDE, 0x00000000);  // Stride 1×1                │
+│   write_reg(CDMA_D_CONV_STRIDE, 0x00010001);  // Stride 2×2                │
+│   write_reg(CDMA_D_CONV_STRIDE, 0x00030003);  // Stride 4×4                │
+│   // Must match CSC D_CONV_STRIDE_EXT                                       │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 46. D_ZERO_PADDING (0x30B4 / 0x0C2D)                             [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Zero-padding around input borders (all four sides)                 │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [4:0]   PAD_LEFT   - Left padding (0-31 pixels)                           │
+│   [13:8]  PAD_RIGHT  - Right padding (0-63 pixels)                          │
+│   [20:16] PAD_TOP    - Top padding (0-31 pixels)                            │
+│   [29:24] PAD_BOTTOM - Bottom padding (0-63 pixels)                         │
+│                                                                              │
+│ NOTE: Right/bottom fields are wider (6 bits) because they can be            │
+│ larger due to output dimension rounding with stride > 1.                    │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // Same padding for 3×3 conv (pad=1 all sides):                          │
+│   write_reg(CDMA_D_ZERO_PADDING, 0x01010101);                              │
+│                                                                              │
+│   // Valid convolution (no padding):                                        │
+│   write_reg(CDMA_D_ZERO_PADDING, 0x00000000);                              │
+│                                                                              │
+│   // 5×5 conv, pad=2:                                                       │
+│   write_reg(CDMA_D_ZERO_PADDING, 0x02020202);                              │
+│                                                                              │
+│ NOTE: For DC mode (feature) and Winograd, PAD_VALUE is always signed.       │
+│ For image input, signed/unsigned depends on PIXEL_SIGN_OVERRIDE.            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 47. D_ZERO_PADDING_VALUE (0x30B8 / 0x0C2E)                       [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Value used to fill padded regions                                  │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [15:0] PAD_VALUE - Pad value. [7:0] for INT8, [15:0] for INT16/FP16      │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_ZERO_PADDING_VALUE, 0x0000);  // Zero padding (typical) │
+│   // Must match CSC D_ZERO_PADDING_VALUE                                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 48. D_BANK (0x30BC / 0x0C2F)                                     [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: CBUF bank allocation between data and weights                      │
+│          CBUF has banks (typically 32), split between data and weights       │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [4:0]   DATA_BANK   - Number of data banks - 1                            │
+│   [20:16] WEIGHT_BANK - Number of weight banks - 1                          │
+│                                                                              │
+│ CONSTRAINT: DATA_BANK + WEIGHT_BANK + 2 <= total CBUF banks                │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // 16 data banks + 16 weight banks:                                       │
+│   write_reg(CDMA_D_BANK, (15 << 16) | 15);  // 0x000F000F                  │
+│                                                                              │
+│   // More data banks for large activations:                                 │
+│   write_reg(CDMA_D_BANK, (7 << 16) | 23);   // 24 data + 8 weight          │
+│                                                                              │
+│   // Must match CSC D_BANK exactly                                          │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 49. D_NAN_FLUSH_TO_ZERO (0x30C0 / 0x0C30)                        [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Option to flush NaN values in input data to zero                   │
+│          Only relevant for FP16 mode                                         │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] NAN_TO_ZERO                                                           │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = DISABLE - Keep NaN values                                           │
+│   0x1 = ENABLE  - Replace NaN with 0.0                                      │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_NAN_FLUSH_TO_ZERO, 0x1);  // Recommended for FP16       │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 50-53. D_NAN/INF_INPUT_DATA/WEIGHT_NUM                           [READ ONLY] │
+│        (0x30C4-0x30D0 / 0x0C31-0x0C34)                                       │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: FP16 diagnostic counters (updated per layer)                       │
+│                                                                              │
+│ D_NAN_INPUT_DATA_NUM   (0x30C4) [31:0] - NaN count in input data           │
+│ D_NAN_INPUT_WEIGHT_NUM (0x30C8) [31:0] - NaN count in weight kernels       │
+│ D_INF_INPUT_DATA_NUM   (0x30CC) [31:0] - Infinity count in input data      │
+│ D_INF_INPUT_WEIGHT_NUM (0x30D0) [31:0] - Infinity count in weight kernels  │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // After operation completes:                                             │
+│   nan_data = read_reg(CDMA_D_NAN_INPUT_DATA_NUM);                           │
+│   nan_wt   = read_reg(CDMA_D_NAN_INPUT_WEIGHT_NUM);                        │
+│   inf_data = read_reg(CDMA_D_INF_INPUT_DATA_NUM);                           │
+│   inf_wt   = read_reg(CDMA_D_INF_INPUT_WEIGHT_NUM);                        │
+│   if (nan_data > 0) printf("WARNING: %u NaN in data\n", nan_data);         │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 54. D_PERF_ENABLE (0x30D4 / 0x0C35)                              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Enable CDMA performance counters                                   │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] DMA_EN - Enable performance counters                                  │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = Disabled                                                            │
+│   0x1 = Enabled                                                             │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_PERF_ENABLE, 0x1);  // Enable before operation          │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 55-58. D_PERF_DAT/WT_READ_STALL, D_PERF_DAT/WT_READ_LATENCY     [READ ONLY] │
+│        (0x30D8-0x30E4 / 0x0C36-0x0C39)                                       │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: DMA performance counters (updated per layer)                       │
+│                                                                              │
+│ D_PERF_DAT_READ_STALL   (0x30D8) [31:0] - Data read stall cycles           │
+│ D_PERF_WT_READ_STALL    (0x30DC) [31:0] - Weight read stall cycles         │
+│ D_PERF_DAT_READ_LATENCY (0x30E0) [31:0] - Total data read latency          │
+│ D_PERF_WT_READ_LATENCY  (0x30E4) [31:0] - Total weight read latency        │
+│                                                                              │
+│ STALL = cycles DMA was blocked waiting for memory response                  │
+│ LATENCY = total accumulated response latency across all requests            │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_PERF_ENABLE, 0x1);   // Enable first                    │
+│   // ... run operation ...                                                  │
+│   dat_stall = read_reg(CDMA_D_PERF_DAT_READ_STALL);                        │
+│   wt_stall  = read_reg(CDMA_D_PERF_WT_READ_STALL);                         │
+│   printf("Data stall: %u, Weight stall: %u\n", dat_stall, wt_stall);       │
+│   // High stall → memory bandwidth bottleneck                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 59. D_CYA (0x30E8 / 0x0C3A)                                      [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: "Cover Your Assets" — Reserved for post-silicon bug workarounds    │
+│                                                                              │
+│ BIT LAYOUT: [31:0] CYA                                                      │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDMA_D_CYA, 0x0);  // Leave at 0 unless instructed             │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+          2. CSC MODULE - CONVOLUTION SEQUENCE CONTROLLER (Base: 0x4000)
+═══════════════════════════════════════════════════════════════════════════════
+
+The CSC reads data and weights from CBUF and assembles them into the correct
+order for the MAC arrays. It controls the convolution computation sequence:
+sliding window, stride, dilation, padding, and kernel scheduling.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 1. S_STATUS (0x4000 / 0x1000)                                    [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ Same as CDMA S_STATUS. [1:0]=STATUS_0, [17:16]=STATUS_1                     │
+│ Values: 0x0=IDLE, 0x1=RUNNING, 0x2=PENDING                                 │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 2. S_POINTER (0x4004 / 0x1001)                                   [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ Same as CDMA S_POINTER. [0]=PRODUCER(RW), [16]=CONSUMER(RO)                 │
+│ Must match CDMA S_POINTER setting.                                          │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 3. D_OP_ENABLE (0x4008 / 0x1002)                                 [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ Same as CDMA D_OP_ENABLE. [0]=OP_EN (0=DISABLE, 1=ENABLE)                  │
+│ Write LAST after configuring all other CSC D_* registers.                   │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 4. D_MISC_CFG (0x400C / 0x1003)                                  [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Same fields as CDMA D_MISC_CFG — must match                        │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0]     CONV_MODE       - 0=DIRECT, 1=WINOGRAD                           │
+│   [9:8]   IN_PRECISION    - 0=INT8, 1=INT16, 2=FP16                        │
+│   [13:12] PROC_PRECISION  - 0=INT8, 1=INT16, 2=FP16                        │
+│   [16]    DATA_REUSE      - 0=DISABLE, 1=ENABLE                            │
+│   [20]    WEIGHT_REUSE    - 0=DISABLE, 1=ENABLE                            │
+│   [24]    SKIP_DATA_RLS   - 0=DISABLE, 1=ENABLE                            │
+│   [28]    SKIP_WEIGHT_RLS - 0=DISABLE, 1=ENABLE                            │
+│                                                                              │
+│ CRITICAL: Must be identical to CDMA D_MISC_CFG                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 5. D_DATAIN_FORMAT (0x4010 / 0x1004)                              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Input format (feature or pixel)                                    │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] DATAIN_FORMAT - 0=FEATURE, 1=PIXEL                                   │
+│                                                                              │
+│ NOTE: CSC only has the format bit (no pixel sub-format like CDMA)           │
+│ Must match CDMA D_DATAIN_FORMAT[0]                                          │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CSC_D_DATAIN_FORMAT, 0x0);  // Feature map                     │
+│   write_reg(CSC_D_DATAIN_FORMAT, 0x1);  // Pixel input                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 6. D_DATAIN_SIZE_EXT_0 (0x4014 / 0x1005)                         [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Input data cube width and height (after any extension)             │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [12:0]  DATAIN_WIDTH_EXT  - Input width - 1                              │
+│   [28:16] DATAIN_HEIGHT_EXT - Input height - 1                             │
+│                                                                              │
+│ For direct conv: same as CDMA D_DATAIN_SIZE_0                               │
+│ For Winograd: same as CDMA D_DATAIN_SIZE_EXT_0                              │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // Direct conv, 224×224:                                                  │
+│   write_reg(CSC_D_DATAIN_SIZE_EXT_0, (223 << 16) | 223);                   │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 7. D_DATAIN_SIZE_EXT_1 (0x4018 / 0x1006)                         [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Input data cube channel count                                      │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [12:0] DATAIN_CHANNEL_EXT - Input channels - 1                           │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CSC_D_DATAIN_SIZE_EXT_1, 63);  // 64 channels                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 8. D_BATCH_NUMBER (0x401C / 0x1007)                               [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Batch count (must match CDMA and CACC)                             │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [4:0] BATCHES - batch number - 1                                          │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CSC_D_BATCH_NUMBER, 0);  // 1 batch                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 9. D_POST_Y_EXTENSION (0x4020 / 0x1008)                          [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Post Y dimension extension factor                                  │
+│          Extended height = 2^Y_EXTENSION                                     │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [1:0] Y_EXTENSION - 0, 1, or 2                                           │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0 = No extension (height × 1)                                             │
+│   1 = Double height (height × 2)                                            │
+│   2 = Quadruple height (height × 4)                                         │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CSC_D_POST_Y_EXTENSION, 0);  // No extension (typical)         │
+│   // Used for channel extension optimization                                │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 10. D_ENTRY_PER_SLICE (0x4024 / 0x1009)                          [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: CBUF entries per input data slice (must match CDMA)                │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [13:0] ENTRIES - entries per slice - 1                                    │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // Must match CDMA_D_ENTRY_PER_SLICE exactly                              │
+│   write_reg(CSC_D_ENTRY_PER_SLICE, entries - 1);                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 11. D_WEIGHT_FORMAT (0x4028 / 0x100A)                             [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Weight format (must match CDMA)                                    │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] WEIGHT_FORMAT - 0=UNCOMPRESSED, 1=COMPRESSED                         │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CSC_D_WEIGHT_FORMAT, 0x0);  // Dense weights                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 12. D_WEIGHT_SIZE_EXT_0 (0x402C / 0x100B)                        [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Weight kernel spatial dimensions                                   │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [4:0]   WEIGHT_WIDTH_EXT  - Kernel width - 1 (max 32)                    │
+│   [20:16] WEIGHT_HEIGHT_EXT - Kernel height - 1 (max 32)                   │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // 3×3 kernel:                                                            │
+│   write_reg(CSC_D_WEIGHT_SIZE_EXT_0, (2 << 16) | 2);  // 0x00020002        │
+│                                                                              │
+│   // 1×1 kernel:                                                            │
+│   write_reg(CSC_D_WEIGHT_SIZE_EXT_0, (0 << 16) | 0);  // 0x00000000        │
+│                                                                              │
+│   // 7×7 kernel:                                                            │
+│   write_reg(CSC_D_WEIGHT_SIZE_EXT_0, (6 << 16) | 6);  // 0x00060006        │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 13. D_WEIGHT_SIZE_EXT_1 (0x4030 / 0x100C)                        [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Weight kernel channel depth and total kernel count                 │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [12:0]  WEIGHT_CHANNEL_EXT - Input channels per kernel - 1               │
+│   [28:16] WEIGHT_KERNEL      - Number of kernels (output channels) - 1     │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // 64 input channels, 128 output channels:                               │
+│   write_reg(CSC_D_WEIGHT_SIZE_EXT_1, (127 << 16) | 63);                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 14. D_WEIGHT_BYTES (0x4034 / 0x100D)                              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Total weight bytes (must match CDMA)                               │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [24:0] WEIGHT_BYTES - Total bytes (max ~33MB)                             │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CSC_D_WEIGHT_BYTES, 73728);  // Match CDMA value               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 15. D_WMB_BYTES (0x4038 / 0x100E)                                [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Total WMB bytes (compressed weights only, must match CDMA)         │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [20:0] WMB_BYTES                                                          │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CSC_D_WMB_BYTES, 0);  // 0 for uncompressed weights            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 16-17. D_DATAOUT_SIZE_0/1 (0x403C-0x4040 / 0x100F-0x1010)        [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Output data cube dimensions                                        │
+│                                                                              │
+│ D_DATAOUT_SIZE_0 (0x403C):                                                  │
+│   [12:0]  DATAOUT_WIDTH   - Output width - 1                               │
+│   [28:16] DATAOUT_HEIGHT  - Output height - 1                              │
+│                                                                              │
+│ D_DATAOUT_SIZE_1 (0x4040):                                                  │
+│   [12:0]  DATAOUT_CHANNEL - Output channels - 1 (= num_kernels - 1)        │
+│                                                                              │
+│ FORMULA:                                                                    │
+│   out_w = (in_w + pad_l + pad_r - kernel_w) / stride_x + 1                 │
+│   out_h = (in_h + pad_t + pad_b - kernel_h) / stride_y + 1                 │
+│   out_c = num_kernels                                                       │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // 224→112 with 3×3, stride 2, pad 1:                                    │
+│   write_reg(CSC_D_DATAOUT_SIZE_0, (111 << 16) | 111);                      │
+│   write_reg(CSC_D_DATAOUT_SIZE_1, 127);  // 128 output channels            │
+│   // Must match CACC D_DATAOUT_SIZE_0/1                                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 18. D_ATOMICS (0x4044 / 0x1011)                                  [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Total output spatial positions = output_width × output_height - 1  │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [20:0] ATOMICS                                                            │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // 112×112 output: atomics = 112*112 - 1 = 12543                         │
+│   write_reg(CSC_D_ATOMICS, 12543);                                          │
+│                                                                              │
+│   // 56×56 output: atomics = 56*56 - 1 = 3135                              │
+│   write_reg(CSC_D_ATOMICS, 3135);                                           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 19. D_RELEASE (0x4048 / 0x1012)                                  [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Number of input data slices to release after consumption           │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [11:0] RLS_SLICES - slices to release - 1                                │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // Release all input height slices:                                       │
+│   write_reg(CSC_D_RELEASE, input_height - 1);                               │
+│   // Controls CBUF recycling for pipeline efficiency                        │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 20. D_CONV_STRIDE_EXT (0x404C / 0x1013)                          [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Convolution stride (must match CDMA D_CONV_STRIDE)                 │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [2:0]   CONV_X_STRIDE_EXT - Horizontal stride - 1                        │
+│   [18:16] CONV_Y_STRIDE_EXT - Vertical stride - 1                          │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CSC_D_CONV_STRIDE_EXT, 0x00000000);  // Stride 1×1             │
+│   write_reg(CSC_D_CONV_STRIDE_EXT, 0x00010001);  // Stride 2×2             │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 21. D_DILATION_EXT (0x4050 / 0x1014)                              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Dilation factor for dilated/atrous convolution                     │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [4:0]   X_DILATION_EXT - X dilation - 1 (max 32)                         │
+│   [20:16] Y_DILATION_EXT - Y dilation - 1 (max 32)                         │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0 = No dilation (standard convolution, dilation=1)                        │
+│   1 = Dilation of 2 (skip 1 element between kernel taps)                    │
+│   n = Dilation of n+1                                                       │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CSC_D_DILATION_EXT, 0x00000000);  // No dilation (standard)    │
+│   write_reg(CSC_D_DILATION_EXT, 0x00010001);  // Dilation 2                 │
+│   write_reg(CSC_D_DILATION_EXT, 0x00030003);  // Dilation 4 (atrous)       │
+│                                                                              │
+│ NOTE: CSC-only register. CDMA doesn't need dilation config because          │
+│ CSC handles the strided buffer addressing.                                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 22. D_ZERO_PADDING (0x4054 / 0x1015)                             [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Zero padding (left and top only; CSC uses these for scheduling)    │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [4:0]   PAD_LEFT - Left padding (0-31)                                    │
+│   [20:16] PAD_TOP  - Top padding (0-31)                                     │
+│                                                                              │
+│ NOTE: CSC only needs left/top. CDMA has all four sides.                     │
+│ Must match CDMA D_ZERO_PADDING PAD_LEFT and PAD_TOP.                        │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CSC_D_ZERO_PADDING, (1 << 16) | 1);  // Pad L=1, T=1          │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 23. D_ZERO_PADDING_VALUE (0x4058 / 0x1016)                       [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Padding value (always signed in CSC)                               │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [15:0] PAD_VALUE - [7:0] for INT8, [15:0] for INT16/FP16                 │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CSC_D_ZERO_PADDING_VALUE, 0x0);  // Zero padding               │
+│   // Must match CDMA D_ZERO_PADDING_VALUE                                   │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 24. D_BANK (0x405C / 0x1017)                                     [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: CBUF bank allocation (must match CDMA D_BANK)                      │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [4:0]   DATA_BANK   - Number of data banks - 1                            │
+│   [20:16] WEIGHT_BANK - Number of weight banks - 1                          │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CSC_D_BANK, (15 << 16) | 15);  // Must match CDMA              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 25. D_PRA_CFG (0x4060 / 0x1018)                                  [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: PRA (Pre-Rounding Adjustment) truncation configuration             │
+│          Used for mixed-precision convolution (INT8→INT8 via INT16 path)    │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [1:0] PRA_TRUNCATE - Truncation bits (0, 1, or 2)                        │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CSC_D_PRA_CFG, 0x0);  // No truncation (typical)               │
+│   write_reg(CSC_D_PRA_CFG, 0x2);  // Truncate 2 bits                       │
+│   // Only relevant for INT8 input + INT16 processing precision              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 26. D_CYA (0x4064 / 0x1019)                                      [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: CYA register — leave at 0x0                                        │
+│ BIT LAYOUT: [31:0] CYA                                                      │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+        3. CMAC_A MODULE - CONVOLUTION MAC ARRAY A (Base: 0x5000)
+═══════════════════════════════════════════════════════════════════════════════
+
+CMAC_A and CMAC_B are twin MAC arrays that perform the actual multiply-
+accumulate operations. They have minimal configuration — mainly just the
+convolution mode and precision to match the rest of the pipeline.
+
+CMAC processes 16 output channels in parallel (nv_small) or 64 (nv_large).
+The two arrays (A and B) process different sets of output channels.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 1. S_STATUS (0x5000 / 0x1400)                                    [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ Same format as all other modules.                                           │
+│ [1:0]=STATUS_0, [17:16]=STATUS_1 (IDLE/RUNNING/PENDING)                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 2. S_POINTER (0x5004 / 0x1401)                                   [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ [0]=PRODUCER(RW), [16]=CONSUMER(RO). Must match all other stages.           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 3. D_OP_ENABLE (0x5008 / 0x1402)                                 [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ [0] OP_EN  - 0=DISABLE, 1=ENABLE                                           │
+│ Write LAST to start CMAC_A operation.                                       │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 4. D_MISC_CFG (0x500C / 0x1403)                                  [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Convolution mode and processing precision                          │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0]     CONV_MODE      - 0=DIRECT, 1=WINOGRAD                            │
+│   [13:12] PROC_PRECISION - 0=INT8, 1=INT16, 2=FP16                         │
+│                                                                              │
+│ NOTE: CMAC does NOT have IN_PRECISION, DATA_REUSE, WEIGHT_REUSE,           │
+│ SKIP_DATA_RLS, or SKIP_WEIGHT_RLS fields (those are CDMA/CSC-only).        │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // Direct conv, INT8:                                                     │
+│   write_reg(CMAC_A_D_MISC_CFG, 0x00000000);                                │
+│                                                                              │
+│   // Direct conv, FP16:                                                     │
+│   write_reg(CMAC_A_D_MISC_CFG, 0x00002000);                                │
+│                                                                              │
+│   // Winograd, INT16:                                                       │
+│   write_reg(CMAC_A_D_MISC_CFG, 0x00001001);                                │
+│                                                                              │
+│ CRITICAL: CONV_MODE and PROC_PRECISION must match other stages              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+        4. CMAC_B MODULE - CONVOLUTION MAC ARRAY B (Base: 0x6000)
+═══════════════════════════════════════════════════════════════════════════════
+
+CMAC_B is identical to CMAC_A. Same register layout, same fields.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 1. S_STATUS   (0x6000 / 0x1800) - Same as CMAC_A                [READ ONLY] │
+│ 2. S_POINTER  (0x6004 / 0x1801) - Same as CMAC_A                [READ/WRITE]│
+│ 3. D_OP_ENABLE(0x6008 / 0x1802) - Same as CMAC_A                [READ/WRITE]│
+│ 4. D_MISC_CFG (0x600C / 0x1803) - Same as CMAC_A                [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ CMAC_B D_MISC_CFG:                                                          │
+│   [0]     CONV_MODE      - 0=DIRECT, 1=WINOGRAD                            │
+│   [13:12] PROC_PRECISION - 0=INT8, 1=INT16, 2=FP16                         │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // Must be configured identically to CMAC_A:                              │
+│   write_reg(CMAC_B_D_MISC_CFG, 0x00000000);  // Direct, INT8               │
+│   write_reg(CMAC_B_D_OP_ENABLE, 0x1);                                      │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+         5. CACC MODULE - CONVOLUTION ACCUMULATOR (Base: 0x7000)
+═══════════════════════════════════════════════════════════════════════════════
+
+The CACC accumulates partial results from CMAC_A and CMAC_B across all
+input channel groups. When all partial sums are complete, it performs
+truncation/clipping and writes the final result to the assembly buffer
+which feeds the SDP (Single Data Processor) for post-processing.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 1. S_STATUS (0x7000 / 0x1C00)                                    [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ Same format. [1:0]=STATUS_0, [17:16]=STATUS_1 (IDLE/RUNNING/PENDING)        │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // Check CACC status to know when convolution is FULLY complete           │
+│   while ((read_reg(CACC_S_STATUS) & 0x3) != 0x0);  // Wait for IDLE        │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 2. S_POINTER (0x7004 / 0x1C01)                                   [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ [0]=PRODUCER(RW), [16]=CONSUMER(RO). Must match all other stages.           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 3. D_OP_ENABLE (0x7008 / 0x1C02)                                 [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ [0] OP_EN - 0=DISABLE, 1=ENABLE                                            │
+│ Write LAST to start CACC accumulation.                                      │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 4. D_MISC_CFG (0x700C / 0x1C03)                                  [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Convolution mode and processing precision                          │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0]     CONV_MODE      - 0=DIRECT, 1=WINOGRAD                            │
+│   [13:12] PROC_PRECISION - 0=INT8, 1=INT16, 2=FP16                         │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CACC_D_MISC_CFG, 0x00000000);  // Direct, INT8                 │
+│   write_reg(CACC_D_MISC_CFG, 0x00002000);  // Direct, FP16                 │
+│   // Must match CDMA, CSC, CMAC_A, CMAC_B                                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 5. D_DATAOUT_SIZE_0 (0x7010 / 0x1C04)                            [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Output data cube width and height                                  │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [12:0]  DATAOUT_WIDTH  - Output width - 1                                │
+│   [28:16] DATAOUT_HEIGHT - Output height - 1                               │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // 112×112 output:                                                        │
+│   write_reg(CACC_D_DATAOUT_SIZE_0, (111 << 16) | 111);                     │
+│   // Must match CSC D_DATAOUT_SIZE_0                                        │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 6. D_DATAOUT_SIZE_1 (0x7014 / 0x1C05)                            [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Output data cube channel count                                     │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [12:0] DATAOUT_CHANNEL - Output channels - 1                             │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CACC_D_DATAOUT_SIZE_1, 127);  // 128 output channels           │
+│   // Must match CSC D_DATAOUT_SIZE_1                                        │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 7. D_DATAOUT_ADDR (0x7018 / 0x1C06)                              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Base address of output data (lower 32 bits)                        │
+│          This is the assembly buffer address for SDP handoff                │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] DATAOUT_ADDR - Output data address                                │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CACC_D_DATAOUT_ADDR, 0x90000000);  // Output destination        │
+│   // This address is used by CACC to write accumulated results              │
+│   // SDP reads from this address for post-processing                        │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 8. D_BATCH_NUMBER (0x701C / 0x1C07)                               [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Batch count (must match CDMA and CSC)                              │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [4:0] BATCHES - batch number - 1                                          │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CACC_D_BATCH_NUMBER, 0);  // 1 batch                           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 9. D_LINE_STRIDE (0x7020 / 0x1C08)                               [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Output line stride in bytes                                        │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [23:0] LINE_STRIDE - Stride in bytes                                      │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // 112 wide output, 32-bit accumulator per element:                       │
+│   write_reg(CACC_D_LINE_STRIDE, 112 * 4);  // 448 bytes                    │
+│   // CACC accumulates in wider precision (32-bit or 48-bit internal)        │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 10. D_SURF_STRIDE (0x7024 / 0x1C09)                              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Output surface stride in bytes                                     │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [23:0] SURF_STRIDE - Stride in bytes                                      │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // 112×112 output:                                                        │
+│   write_reg(CACC_D_SURF_STRIDE, 112 * 112 * 4);  // 50176 bytes            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 11. D_DATAOUT_MAP (0x7028 / 0x1C0A)                              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Output memory packing mode                                         │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0]  LINE_PACKED - Lines are tightly packed                               │
+│   [16] SURF_PACKED - Surfaces/channels tightly packed                       │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = FALSE - Use stride values                                           │
+│   0x1 = TRUE  - Tightly packed (ignore stride)                              │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CACC_D_DATAOUT_MAP, 0x00010001);  // Both packed               │
+│   write_reg(CACC_D_DATAOUT_MAP, 0x00000000);  // Use stride registers       │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 12. D_CLIP_CFG (0x702C / 0x1C0B)                                 [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Number of bits to truncate from accumulated result                 │
+│          Controls output precision after accumulation                        │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [4:0] CLIP_TRUNCATE - Number of truncation bits (0-16, unsigned)          │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CACC_D_CLIP_CFG, 0);   // No truncation (full precision)       │
+│   write_reg(CACC_D_CLIP_CFG, 4);   // Truncate 4 LSBs                      │
+│   write_reg(CACC_D_CLIP_CFG, 8);   // Truncate 8 LSBs                      │
+│                                                                              │
+│ NOTES:                                                                      │
+│   - For INT8×INT8 MAC: accumulator is wider than 8 bits                     │
+│   - Truncation brings result back to target precision                       │
+│   - Values that overflow after truncation are saturated                     │
+│   - Check D_OUT_SATURATION after operation for saturation count             │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 13. D_OUT_SATURATION (0x7030 / 0x1C0C)                           [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Count of output elements that saturated after truncation           │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] SAT_COUNT - Saturation count                                       │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // After operation completes:                                             │
+│   sat = read_reg(CACC_D_OUT_SATURATION);                                    │
+│   if (sat > 0) printf("WARNING: %u outputs saturated\n", sat);             │
+│   // High saturation count → CLIP_TRUNCATE may be too aggressive            │
+│   // or model weights need re-quantization                                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 14. D_CYA (0x7034 / 0x1C0D)                                      [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: CYA register — leave at 0x0                                        │
+│ BIT LAYOUT: [31:0] CYA                                                      │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                CROSS-MODULE REGISTER CONSISTENCY REQUIREMENTS
+═══════════════════════════════════════════════════════════════════════════════
+
+The following registers MUST be configured consistently across modules:
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ PARAMETER          │ CDMA        │ CSC         │ CMAC_A/B    │ CACC         │
+├────────────────────┼─────────────┼─────────────┼─────────────┼──────────────┤
+│ S_POINTER          │ Must match  │ Must match  │ Must match  │ Must match   │
+│ CONV_MODE          │ D_MISC_CFG  │ D_MISC_CFG  │ D_MISC_CFG  │ D_MISC_CFG   │
+│ PROC_PRECISION     │ D_MISC_CFG  │ D_MISC_CFG  │ D_MISC_CFG  │ D_MISC_CFG   │
+│ IN_PRECISION       │ D_MISC_CFG  │ D_MISC_CFG  │ —           │ —            │
+│ DATA_REUSE         │ D_MISC_CFG  │ D_MISC_CFG  │ —           │ —            │
+│ WEIGHT_REUSE       │ D_MISC_CFG  │ D_MISC_CFG  │ —           │ —            │
+│ WEIGHT_FORMAT      │ D_WEIGHT_F  │ D_WEIGHT_F  │ —           │ —            │
+│ WEIGHT_BYTES       │ D_WEIGHT_B  │ D_WEIGHT_B  │ —           │ —            │
+│ WMB_BYTES          │ D_WMB_BYTES │ D_WMB_BYTES │ —           │ —            │
+│ ENTRY_PER_SLICE    │ D_ENTRY_P   │ D_ENTRY_P   │ —           │ —            │
+│ BANK allocation    │ D_BANK      │ D_BANK      │ —           │ —            │
+│ BATCH_NUMBER       │ D_BATCH_N   │ D_BATCH_N   │ —           │ D_BATCH_N    │
+│ Conv stride        │ D_CONV_S    │ D_CONV_S_E  │ —           │ —            │
+│ Padding value      │ D_ZERO_P_V  │ D_ZERO_P_V  │ —           │ —            │
+│ Output W/H/C       │ —           │ D_DATAOUT_S │ —           │ D_DATAOUT_S  │
+│ DATAIN_FORMAT      │ D_DATAIN_F  │ D_DATAIN_F  │ —           │ —            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                    COMPLETE CONFIGURATION EXAMPLE
+═══════════════════════════════════════════════════════════════════════════════
+
+SCENARIO: 3×3 Direct Convolution, stride 1, pad 1
+          Input:  56×56×64 INT8 from DRAM
+          Output: 56×56×128 INT8
+          Weights: 128 kernels, 3×3×64 each, uncompressed
+
+// ===================== CDMA Configuration =====================
+write_reg(CDMA_S_POINTER, 0x0);                          // Group 0
+
+write_reg(CDMA_D_MISC_CFG, 0x00000000);                 // Direct, INT8, no reuse
+write_reg(CDMA_D_DATAIN_FORMAT, 0x00000000);             // Feature map
+write_reg(CDMA_D_DATAIN_SIZE_0, (55 << 16) | 55);       // 56×56
+write_reg(CDMA_D_DATAIN_SIZE_1, 63);                     // 64 channels
+write_reg(CDMA_D_DATAIN_SIZE_EXT_0, (55 << 16) | 55);   // Same for direct
+write_reg(CDMA_D_PIXEL_OFFSET, 0x0);                     // Not pixel mode
+write_reg(CDMA_D_DAIN_RAM_TYPE, 0x1);                    // MCIF (DRAM)
+write_reg(CDMA_D_DAIN_ADDR_HIGH_0, 0x0);
+write_reg(CDMA_D_DAIN_ADDR_LOW_0, 0x80000000);           // Data address
+write_reg(CDMA_D_LINE_STRIDE, 56 * 64);                  // 56 * 64 * 1 byte
+write_reg(CDMA_D_SURF_STRIDE, 56 * 56);                  // Per surface
+write_reg(CDMA_D_DAIN_MAP, 0x00010001);                  // Packed
+write_reg(CDMA_D_BATCH_NUMBER, 0);                        // 1 batch
+write_reg(CDMA_D_BATCH_STRIDE, 0);
+write_reg(CDMA_D_ENTRY_PER_SLICE, entries_per_slice - 1); // Calculated
+write_reg(CDMA_D_FETCH_GRAIN, 0);                         // 1 slice per grain
+
+write_reg(CDMA_D_WEIGHT_FORMAT, 0x0);                    // Uncompressed
+write_reg(CDMA_D_WEIGHT_SIZE_0, 3*3*64 - 1);             // 575 bytes/kernel
+write_reg(CDMA_D_WEIGHT_SIZE_1, 127);                     // 128 kernels
+write_reg(CDMA_D_WEIGHT_RAM_TYPE, 0x1);                   // MCIF
+write_reg(CDMA_D_WEIGHT_ADDR_HIGH, 0x0);
+write_reg(CDMA_D_WEIGHT_ADDR_LOW, 0x80100000);            // Weight address
+write_reg(CDMA_D_WEIGHT_BYTES, 128 * 3 * 3 * 64);        // Total bytes
+
+write_reg(CDMA_D_MEAN_FORMAT, 0x0);                       // No mean subtract
+write_reg(CDMA_D_CVT_CFG, 0x0);                           // No conversion
+write_reg(CDMA_D_CONV_STRIDE, 0x00000000);                // Stride 1×1
+write_reg(CDMA_D_ZERO_PADDING, 0x01010101);               // Pad 1 all sides
+write_reg(CDMA_D_ZERO_PADDING_VALUE, 0x0);                // Zero fill
+write_reg(CDMA_D_BANK, (15 << 16) | 15);                  // 16+16 CBUF banks
+write_reg(CDMA_D_NAN_FLUSH_TO_ZERO, 0x0);                // N/A for INT8
+
+write_reg(CDMA_D_OP_ENABLE, 0x1);                         // START CDMA!
+
+
+// ===================== CSC Configuration =====================
+write_reg(CSC_S_POINTER, 0x0);                            // Group 0
+
+write_reg(CSC_D_MISC_CFG, 0x00000000);                   // Match CDMA
+write_reg(CSC_D_DATAIN_FORMAT, 0x0);                      // Feature
+write_reg(CSC_D_DATAIN_SIZE_EXT_0, (55 << 16) | 55);     // 56×56
+write_reg(CSC_D_DATAIN_SIZE_EXT_1, 63);                   // 64 channels
+write_reg(CSC_D_BATCH_NUMBER, 0);                          // 1 batch
+write_reg(CSC_D_POST_Y_EXTENSION, 0);                     // No extension
+write_reg(CSC_D_ENTRY_PER_SLICE, entries_per_slice - 1);  // Match CDMA
+
+write_reg(CSC_D_WEIGHT_FORMAT, 0x0);                      // Uncompressed
+write_reg(CSC_D_WEIGHT_SIZE_EXT_0, (2 << 16) | 2);       // 3×3 kernel
+write_reg(CSC_D_WEIGHT_SIZE_EXT_1, (127 << 16) | 63);    // 128 kernels, 64ch
+write_reg(CSC_D_WEIGHT_BYTES, 128 * 3 * 3 * 64);         // Match CDMA
+write_reg(CSC_D_WMB_BYTES, 0);                            // No WMB
+
+write_reg(CSC_D_DATAOUT_SIZE_0, (55 << 16) | 55);        // 56×56 output
+write_reg(CSC_D_DATAOUT_SIZE_1, 127);                     // 128 out channels
+write_reg(CSC_D_ATOMICS, 56*56 - 1);                      // 3135
+
+write_reg(CSC_D_RELEASE, 55);                              // Release all slices
+write_reg(CSC_D_CONV_STRIDE_EXT, 0x00000000);            // Stride 1
+write_reg(CSC_D_DILATION_EXT, 0x00000000);                // No dilation
+write_reg(CSC_D_ZERO_PADDING, (1 << 16) | 1);            // Pad L=1, T=1
+write_reg(CSC_D_ZERO_PADDING_VALUE, 0x0);                 // Zero fill
+write_reg(CSC_D_BANK, (15 << 16) | 15);                   // Match CDMA
+write_reg(CSC_D_PRA_CFG, 0x0);                            // No PRA truncation
+
+write_reg(CSC_D_OP_ENABLE, 0x1);                           // START CSC!
+
+
+// ===================== CMAC_A Configuration =====================
+write_reg(CMAC_A_S_POINTER, 0x0);
+write_reg(CMAC_A_D_MISC_CFG, 0x00000000);                // Direct, INT8
+write_reg(CMAC_A_D_OP_ENABLE, 0x1);                       // START!
+
+
+// ===================== CMAC_B Configuration =====================
+write_reg(CMAC_B_S_POINTER, 0x0);
+write_reg(CMAC_B_D_MISC_CFG, 0x00000000);                // Direct, INT8
+write_reg(CMAC_B_D_OP_ENABLE, 0x1);                       // START!
+
+
+// ===================== CACC Configuration =====================
+write_reg(CACC_S_POINTER, 0x0);
+
+write_reg(CACC_D_MISC_CFG, 0x00000000);                  // Direct, INT8
+write_reg(CACC_D_DATAOUT_SIZE_0, (55 << 16) | 55);       // 56×56 output
+write_reg(CACC_D_DATAOUT_SIZE_1, 127);                    // 128 channels
+write_reg(CACC_D_DATAOUT_ADDR, 0x90000000);               // Output address
+write_reg(CACC_D_BATCH_NUMBER, 0);                         // 1 batch
+write_reg(CACC_D_LINE_STRIDE, 56 * 4);                    // 32-bit accum
+write_reg(CACC_D_SURF_STRIDE, 56 * 56 * 4);
+write_reg(CACC_D_DATAOUT_MAP, 0x00010001);                // Packed
+write_reg(CACC_D_CLIP_CFG, 0);                             // No truncation
+
+write_reg(CACC_D_OP_ENABLE, 0x1);                          // START CACC!
+
+
+// ===================== Wait for Completion =====================
+// CACC is the last stage — wait for it to go IDLE
+while ((read_reg(CACC_S_STATUS) & 0x3) != 0x0);
+
+// Check diagnostics
+sat_count = read_reg(CACC_D_OUT_SATURATION);
+if (sat_count > 0) printf("Saturation: %u elements clipped\n", sat_count);
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                      PROGRAMMING ORDER SUMMARY
+═══════════════════════════════════════════════════════════════════════════════
+
+RECOMMENDED PROGRAMMING SEQUENCE:
+  1. Set S_POINTER on ALL 5 modules (same group)
+  2. Configure all CDMA D_* registers (except D_OP_ENABLE)
+  3. Configure all CSC D_* registers (except D_OP_ENABLE)
+  4. Configure CMAC_A D_MISC_CFG
+  5. Configure CMAC_B D_MISC_CFG
+  6. Configure all CACC D_* registers (except D_OP_ENABLE)
+  7. Write D_OP_ENABLE = 1 on CDMA
+  8. Write D_OP_ENABLE = 1 on CSC
+  9. Write D_OP_ENABLE = 1 on CMAC_A
+  10. Write D_OP_ENABLE = 1 on CMAC_B
+  11. Write D_OP_ENABLE = 1 on CACC
+  12. Wait for CACC S_STATUS = IDLE (convolution complete)
+
+PING-PONG OPERATION:
+  While one group is running, configure the other group:
+  - If Group 0 is RUNNING, set S_POINTER to 1 and configure Group 1
+  - When Group 0 finishes, Group 1 starts automatically (PENDING → RUNNING)
+  - This achieves pipeline overlap between consecutive convolution layers
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                 KEY DESIGN NOTES FOR LATER STAGES
+═══════════════════════════════════════════════════════════════════════════════
+
+• CBUF MANAGEMENT: The Convolution Buffer (CBUF) is shared between data
+  and weights. D_BANK on CDMA and CSC must match. Total banks = DATA_BANK +
+  WEIGHT_BANK + 2 (≤32 for nv_small). More data banks help with large
+  activations; more weight banks help with large kernels.
+
+• WEIGHT COMPRESSION: When WEIGHT_FORMAT=COMPRESSED, three additional
+  memory regions are needed: Weight data, WMB (bitmask), WGS (group status).
+  All addresses and byte counts must be configured on CDMA, and WMB_BYTES
+  must match between CDMA and CSC.
+
+• WINOGRAD MODE: Only for 3×3 kernels with stride 1. Transforms computation
+  to reduce multiplications. Requires extended input dimensions calculated
+  by the formula in D_DATAIN_SIZE_EXT_0. All modules must set CONV_MODE=1.
+
+• DATA/WEIGHT REUSE: When consecutive layers share the same input data or
+  weights, enable DATA_REUSE/WEIGHT_REUSE to skip re-fetching from memory.
+  Must pair with SKIP_DATA_RLS/SKIP_WEIGHT_RLS on the previous layer to
+  prevent releasing the CBUF entries.
+
+• PRECISION MODES:
+  - INT8×INT8 → 22-bit accumulator in CACC → truncate via D_CLIP_CFG
+  - INT16×INT16 → 48-bit accumulator → truncate via D_CLIP_CFG
+  - FP16×FP16 → FP32 accumulator → output as FP16
+
+• CACC → SDP HANDOFF: CACC writes accumulated results to an internal
+  assembly buffer. SDP reads from this buffer for bias addition, batch
+  normalization, ReLU, etc. The output address in CACC may refer to
+  the internal SDP pipeline path rather than external memory.
+
+• SATURATION MONITORING: Always check CACC D_OUT_SATURATION after each
+  layer. Non-zero means quantization parameters need adjustment.
+
+═══════════════════════════════════════════════════════════════════════════════
+                              END OF GUIDE
+═══════════════════════════════════════════════════════════════════════════════

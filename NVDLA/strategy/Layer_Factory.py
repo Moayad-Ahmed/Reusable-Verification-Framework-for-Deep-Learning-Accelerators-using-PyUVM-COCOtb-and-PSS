@@ -1,8 +1,10 @@
 from strategy.pooling_strategy import PoolingStrategy
+from strategy.convolution_strategy import ConvolutionStrategy
 
 class LayerFactory:
     _strategies = {
-        'pooling': PoolingStrategy
+        'pooling': PoolingStrategy,
+        'convolution': ConvolutionStrategy,
     }
     
     @classmethod

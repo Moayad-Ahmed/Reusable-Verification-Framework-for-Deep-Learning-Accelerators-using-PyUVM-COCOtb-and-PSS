@@ -1,0 +1,49 @@
+# ═══════════════════════════════════════════════════════════════════
+# NVDLA Convolution — 1×1 DC, 8 input channels, 1 kernel, INT8
+#
+# Simplest possible direct-convolution test:
+#   Input:  1×1 spatial, 8 channels  → 8 bytes
+#   Weight: 1×1 kernel, 8 channels   → 8 bytes (+ padding)
+#   Output: 1×1 spatial, 1 channel   → 1 byte  (atom-padded to 8)
+#
+# SDP configured as transparent passthrough (flying mode,
+# all BS/BN/EW bypassed). The DRAM result is the raw
+# convolution-only output.
+#
+# Golden model:
+#   out = clamp( sum(input[c]*weight[c] for c in 0..7), -128, 127 )
+#   (clip_truncate = 0, so no right-shift)
+# ═══════════════════════════════════════════════════════════════════
+
+test_suite:
+  - name: "NVDLA_DC_1x1x8_k1_simple"
+    description: "1×1 DC INT8 conv, 8ch input, 1 kernel, no truncation"
+
+    layers:
+      - type: "convolution"
+        config:
+          # --- input feature map ---
+          input_shape: [8, 8, 8]        # [H, W, C]
+          num_channels: 8
+          data_range: [-128, 127]           # small values → sum fits in INT8
+          data_format: "INT8"
+
+          # --- kernel / weights ---
+          kernel_h: 1
+          kernel_w: 1
+          num_kernels: 2
+          weight_range: [-3, 3]
+
+          # --- convolution geometry ---
+          stride_h: 1
+          stride_w: 1
+          padding_left: 0
+          padding_right: 0
+          padding_top: 0
+          padding_bottom: 0
+          padding_value: 0
+          dilation_x: 1
+          dilation_y: 1
+
+          # --- CACC truncation ---
+          clip_truncate: 0              # no right-shift

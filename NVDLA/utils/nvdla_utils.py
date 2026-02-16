@@ -121,8 +121,8 @@ class NvdlaBFM(metaclass=utility_classes.Singleton):
         await RisingEdge(self.dut.dla_core_clk)
 
     async def read_from_dram(self, base_addr: int, num_pixels: int,
-                              pixel_bytes: int = 8,
-                              data_bytes_per_pixel: int = 1):
+                            pixel_bytes: int = 8,
+                            data_bytes_per_pixel: int = 1):
         """
         Read output data from DRAM, extracting all channel bytes per pixel.
 
@@ -207,6 +207,24 @@ class NvdlaBFM(metaclass=utility_classes.Singleton):
         while self.dut.dla_intr.value != 1:
             await RisingEdge(self.dut.dla_core_clk)
         logger.info("NVDLA interrupt received!")
+
+    # ----- Register Polling -----
+    async def poll_reg(self, addr: int, expected: int, timeout_cycles: int = 100000):
+        """
+        Poll a CSB register until its value equals *expected*.
+
+        Used for waiting on hardware status bits (e.g. CBUF flush done)
+        before enabling the convolution pipeline.
+        """
+        for _ in range(timeout_cycles):
+            value = await self.reg_read(addr)
+            if value == expected:
+                logger.info("POLL OK:   addr=0x%04x  value=0x%08x", addr, expected)
+                return
+            await RisingEdge(self.dut.dla_csb_clk)
+        raise TimeoutError(
+            f"Poll timeout: addr=0x{addr:04x}, expected=0x{expected:08x}"
+        )
 
     # ---- CRC Calculation ----
     def calc_crc32(self, data_bytes: list) -> int:

@@ -4,7 +4,7 @@ from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles, RisingEdge
 from pyuvm import *
 from pyuvm_components.env import NVDLA_Env
-from pyuvm_components.sequences import PdpTestSequence
+from pyuvm_components.sequences import PdpTestSequence, ConvTestSequence
 
 import os
 
@@ -114,7 +114,6 @@ class Pdp_5x5_MAX_k3_s1_pad1(PdpTestBase):
     YAML_FILE = "5x5_max_k3_s1_pad1.yaml"
     DAT_FILE  = "pdp_5x5_max_k3_s1_pad1_in.dat"
 
-
 @pyuvm.test()
 class Pdp_6x6_MAX_k3_s1_pad2_valm64(PdpTestBase):
     """6x6 Max Pooling, kernel=3, stride=1, pad=2, pad_value=-64 → 8x8 output"""
@@ -133,3 +132,70 @@ class Pdp_4x4_max_k2_s2_4ch(PdpTestBase):
     YAML_FILE = "4x4_max_k2_s2_4ch.yaml"
     DAT_FILE  = "pdp_4x4_max_k2_s2_4ch_in.dat"
 
+
+# ══════════════════════════════════════════════════════════════════════
+#  CONVOLUTION TESTS
+# ══════════════════════════════════════════════════════════════════════
+
+class ConvTestBase(uvm_test):
+    """
+    Base class for all NVDLA convolution tests.
+
+    The convolution pipeline (CDMA→CSC→CMAC_A/B→CACC) always outputs
+    through SDP, which is configured as a transparent passthrough.
+    The result in DRAM is the raw convolution-only output.
+    """
+
+    # Subclasses override these
+    YAML_FILE   = None
+    DAT_FILE    = None     # input .dat
+    WT_FILE     = None     # weight .dat
+
+    def build_phase(self):
+        self.env = NVDLA_Env("NVDLA_Env", self)
+
+    def end_of_elaboration_phase(self):
+        self.sqr = ConfigDB().get(None, "", "SEQR")
+
+    async def run_phase(self):
+        cocotb.start_soon(
+            Clock(cocotb.top.dla_core_clk, 20, unit="ns").start()
+        )
+        cocotb.start_soon(
+            Clock(cocotb.top.dla_csb_clk, 20, unit="ns").start()
+        )
+
+        conv_test = ConvTestSequence(
+            "conv_test",
+            input_file=input_file_path(self.DAT_FILE),
+            weight_file=input_file_path(self.WT_FILE),
+            config_file=config_file_path(self.YAML_FILE),
+        )
+
+        self.raise_objection()
+        await conv_test.start(self.sqr)
+
+        while cocotb.top.dla_intr.value != 1:
+            await RisingEdge(cocotb.top.dla_core_clk)
+
+        await ClockCycles(cocotb.top.dla_core_clk, 1000)
+        self.drop_objection()
+
+
+# ------------------------------------------------------------------ #
+#  Concrete convolution test classes                                  #
+# ------------------------------------------------------------------ #
+
+@pyuvm.test()
+class Conv_DC_1x1x8_k1(ConvTestBase):
+    """Simple 1×1 DC conv: 8 input channels, 1 kernel, no truncation"""
+    YAML_FILE = "dc_1x1x8_k1_simple.yaml"
+    DAT_FILE  = "conv_1x1x8_k1_in.dat"
+    WT_FILE   = "conv_1x1x8_k1_wt.dat"
+
+@pyuvm.test()
+class Conv_DC_2x1x8_k1(ConvTestBase):
+    """Simple 2×1 DC conv: 8 input channels, 1 kernel, no truncation"""
+    YAML_FILE = "dc_2x1x8_k1_simple.yaml"
+    DAT_FILE  = "conv_2x1x8_k1_in.dat"
+    WT_FILE   = "conv_2x1x8_k1_wt.dat"
