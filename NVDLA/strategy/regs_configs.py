@@ -327,10 +327,13 @@ class RegistrationConfigs:
         weight_bytes = max(128, ((weight_raw + 127) // 128) * 128)
 
         # ── input memory layout ───────────────────────────────────────
+        # NVDLA CDMA addresses data per-surface (each surface = 1 atom = 8B).
+        # line_stride = distance between adjacent rows *within one surface*.
+        # surf_stride = distance between the start of surface N and surface N+1.
         atoms_per_pixel = max(1, (num_channels * BPE + ATOM_C - 1) // ATOM_C)
-        pixel_bytes     = atoms_per_pixel * ATOM_C
-        input_line_stride = in_w * pixel_bytes
-        input_surf_stride = input_line_stride * in_h
+        pixel_bytes     = atoms_per_pixel * ATOM_C   # total bytes per pixel (all surfaces)
+        input_line_stride = in_w * ATOM_C             # per-surface: W pixels × 1 atom each
+        input_surf_stride = input_line_stride * in_h  # contiguous surfaces
 
         # ── CBUF slice ────────────────────────────────────────────────
         entries_per_slice = in_w * num_channel_groups  # CBUF entries per line
@@ -364,10 +367,11 @@ class RegistrationConfigs:
         cacc_surf_stride  = cacc_line_stride * out_h
 
         # SDP output (INT8)
+        # SDP also uses per-surface addressing (each surface = 1 atom = 8B).
         out_atoms = max(1, (num_kernels * BPE + ATOM_C - 1) // ATOM_C)
-        out_pixel_bytes = out_atoms * ATOM_C
-        sdp_line_stride = out_w * out_pixel_bytes
-        sdp_surf_stride = sdp_line_stride * out_h
+        out_pixel_bytes = out_atoms * ATOM_C          # total bytes per output pixel
+        sdp_line_stride = out_w * ATOM_C              # per-surface output stride
+        sdp_surf_stride = sdp_line_stride * out_h     # contiguous surfaces
 
         # address splits (32-bit addressing)
         in_lo  = input_addr  & 0xFFFFFFFF
@@ -489,8 +493,25 @@ class RegistrationConfigs:
             (CDMA_REG.D_OP_ENABLE,   0x00000001),
         ]
 
-    def fullyConnected_configs(self):
-        pass
+    def fullyConnected_configs(self, fc_config, input_addr=0x0, weight_addr=0x100, output_addr=0x200):
+        """
+        Build register list for a fully-connected layer by mapping FC params
+        to convolution params and delegating to conv_configs.
+
+        FC → Conv mapping:
+            input_features  → num_channels (C), input_shape = [1, 1, C]
+            output_features → num_kernels  (K)
+            kernel = 1×1, stride = 1, padding = 0
+
+        Args:
+            fc_config:   dict with 'input_features', 'output_features', etc.
+            input_addr:  DRAM base address of input data
+            weight_addr: DRAM base address of weight data
+            output_addr: DRAM base address for output result
+        """
+        from strategy.fc_strategy import FullyConnectedStrategy
+        conv_config = FullyConnectedStrategy.fc_to_conv_config(fc_config)
+        return self.conv_configs(conv_config, input_addr, weight_addr, output_addr)
 
     def activation_configs(self):
         pass

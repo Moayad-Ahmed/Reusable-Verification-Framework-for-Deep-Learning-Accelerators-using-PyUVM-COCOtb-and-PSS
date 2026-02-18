@@ -2,9 +2,9 @@
 Convolution-layer strategy for NVDLA nv_small (INT8 Direct-Convolution).
 
 Golden-model pipeline:
-    1. result = conv2d(input, weight)            — full-precision INT32 sum
-    2. result = result >> clip_truncate           — CACC right-shift
-    3. result = clamp(result, -128, 127)          — saturate to INT8
+    1. result = conv2d(input, weight)            -- full-precision INT32 sum
+    2. result = round_half_up(result, truncate)  -- CACC truncation with rounding
+    3. result = clamp(result, -128, 127)         -- saturate to INT8
 
 Weight memory format (nv_small, uncompressed, DC):
     for each kernel_group [0 .. ceil(K/atomK)):
@@ -202,9 +202,21 @@ class ConvolutionStrategy(LayerStrategy):
                 output[:, oh, ow] = np.einsum('kcij,cij->k', weight_i64,
                                               receptive_field.astype(np.int64))
 
-        # CACC truncation (arithmetic right shift)
+        # CACC truncation with round-half-up (matches NVDLA RTL behavior)
+        # The hardware adds a rounding bias before shifting:
+        #   guard  = bit at position (truncate-1)
+        #   sticky = OR of bits below guard
+        #   round_up = guard AND (positive OR sticky)
         if clip_truncate > 0:
-            output = output >> clip_truncate
+            guard = (output >> (clip_truncate - 1)) & 1
+            if clip_truncate > 1:
+                sticky_mask = (1 << (clip_truncate - 1)) - 1
+                sticky = (output & sticky_mask).astype(bool).astype(np.int64)
+            else:
+                sticky = np.zeros_like(output)
+            is_positive = (output >= 0).astype(np.int64)
+            round_up = guard & (is_positive | sticky)
+            output = (output >> clip_truncate) + round_up
 
         # Saturate to INT8
         output = np.clip(output, -128, 127).astype(np.int8)

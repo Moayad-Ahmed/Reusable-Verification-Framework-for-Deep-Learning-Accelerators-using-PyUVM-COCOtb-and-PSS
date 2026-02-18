@@ -8,6 +8,7 @@ from pyuvm_components.sequences import (
     NVDLAVirtualSequencer,
     PdpTestSequence,
     ConvTestSequence,
+    FcTestSequence,
 )
 import os
 
@@ -109,42 +110,42 @@ class PdpBasicTest(PdpTestBase):
 
 @pyuvm.test()
 class Pdp_4x4_MAX_k2_s2(PdpTestBase):
-    """4x4 Max Pooling, kernel=2, stride=2 → 2x2 output"""
+    """4x4 Max Pooling, kernel=2, stride=2 -> 2x2 output"""
     YAML_FILE = "4x4_max_k2_s2.yaml"
     DAT_FILE  = "pdp_4x4_max_k2_s2_in.dat"
 
 
 @pyuvm.test()
 class Pdp_6x6_AVG_k2_s2(PdpTestBase):
-    """6x6 Avg Pooling, kernel=2, stride=2 → 3x3 output"""
+    """6x6 Avg Pooling, kernel=2, stride=2 -> 3x3 output"""
     YAML_FILE = "6x6_avg_k2_s2.yaml"
     DAT_FILE  = "pdp_6x6_avg_k2_s2_in.dat"
 
 
 @pyuvm.test()
 class Pdp_4x4_MIN_k2_s1(PdpTestBase):
-    """4x4 Min Pooling, kernel=2, stride=1 → 3x3 output"""
+    """4x4 Min Pooling, kernel=2, stride=1 -> 3x3 output"""
     YAML_FILE = "4x4_min_k2_s1.yaml"
     DAT_FILE  = "pdp_4x4_min_k2_s1_in.dat"
 
 
 @pyuvm.test()
 class Pdp_8x8_MAX_k4_s4(PdpTestBase):
-    """8x8 Max Pooling, kernel=4, stride=4 → 2x2 output"""
+    """8x8 Max Pooling, kernel=4, stride=4 -> 2x2 output"""
     YAML_FILE = "8x8_max_k4_s4.yaml"
     DAT_FILE  = "pdp_8x8_max_k4_s4_in.dat"
 
 
 @pyuvm.test()
 class Pdp_8x8_AVG_k2_s2(PdpTestBase):
-    """8x8 Avg Pooling, kernel=2, stride=2 → 4x4 output"""
+    """8x8 Avg Pooling, kernel=2, stride=2 -> 4x4 output"""
     YAML_FILE = "8x8_avg_k2_s2.yaml"
     DAT_FILE  = "pdp_8x8_avg_k2_s2_in.dat"
 
 
 @pyuvm.test()
 class Pdp_5x5_MAX_k3_s1_pad1(PdpTestBase):
-    """5x5 Max Pooling, kernel=3, stride=1, pad=1 → 5x5 output"""
+    """5x5 Max Pooling, kernel=3, stride=1, pad=1 -> 5x5 output"""
     YAML_FILE = "5x5_max_k3_s1_pad1.yaml"
     DAT_FILE  = "pdp_5x5_max_k3_s1_pad1_in.dat"
 
@@ -178,7 +179,7 @@ class ConvTestBase(NVDLATestBase):
     """
     Base class for all NVDLA convolution tests.
 
-    Convolution pipeline: CDMA → CSC → CMAC_A/B → CACC → SDP (passthrough).
+    Convolution pipeline: CDMA -> CSC -> CMAC_A/B -> CACC -> SDP (passthrough).
     The result in DRAM is the raw convolution-truncation output.
     """
     WT_FILE = None
@@ -208,3 +209,51 @@ class Conv_DC_2x1x8_k1(ConvTestBase):
     YAML_FILE = "dc_2x1x8_k1_simple.yaml"
     DAT_FILE  = "conv_2x1x8_k1_in.dat"
     WT_FILE   = "conv_2x1x8_k1_wt.dat"
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  FC (FULLY-CONNECTED) BASE
+# ══════════════════════════════════════════════════════════════════════
+
+class FcTestBase(NVDLATestBase):
+    """
+    Base class for all NVDLA fully-connected tests.
+
+    FC layers are mapped to the convolution pipeline as 1×1 convolutions:
+        CDMA -> CSC -> CMAC_A/B -> CACC -> SDP (passthrough) -> DRAM
+    """
+    WT_FILE = None
+
+    def _create_sequence(self):
+        return FcTestSequence(
+            "fc_test",
+            input_file=input_file_path(self.DAT_FILE),
+            weight_file=input_file_path(self.WT_FILE),
+            config_file=config_file_path(self.YAML_FILE),
+        )
+
+
+# ── Concrete FC tests ──────────────────────────────────────────────
+
+
+@pyuvm.test()
+class FC_16in_8out(FcTestBase):
+    """Fully-connected: 16 inputs, 8 outputs, INT8, no truncation"""
+    YAML_FILE = "fc_16in_8out_simple.yaml"
+    DAT_FILE  = "fc_16in_8out_in.dat"
+    WT_FILE   = "fc_16in_8out_wt.dat"
+
+
+@pyuvm.test()
+class FC_64in_32out(FcTestBase):
+    """Fully-connected: 64 inputs, 32 outputs, INT8, truncate=4"""
+    YAML_FILE = "fc_64in_32out.yaml"
+    DAT_FILE  = "fc_64in_32out_in.dat"
+    WT_FILE   = "fc_64in_32out_wt.dat"
+
+@pyuvm.test()
+class FC_8in_1out(FcTestBase):
+    """Fully-connected: 8 inputs, 1 output, INT8, no truncation"""
+    YAML_FILE = "fc_8in_1out_simple.yaml"
+    DAT_FILE  = "fc_8in_1out_in.dat"
+    WT_FILE   = "fc_8in_1out_wt.dat"

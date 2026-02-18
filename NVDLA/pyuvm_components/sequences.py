@@ -61,12 +61,11 @@ class NVDLASequenceBase(uvm_sequence):
             return np.transpose(data, (1, 2, 0)).flatten()
         return data.flatten()
 
-
 # ══════════════════════════════════════════════════════════════════════
-#  PDP SUB-SEQUENCES
+#  CONV SUB-SEQUENCES
 # ══════════════════════════════════════════════════════════════════════
 
-class PdpDataSubSequence(uvm_sequence):
+class DataSubSequence(uvm_sequence):
     """Sends one DataTransaction to the DataAgent sequencer."""
 
     def __init__(self, name, data_tx):
@@ -78,7 +77,7 @@ class PdpDataSubSequence(uvm_sequence):
         await self.finish_item(self.data_tx)
 
 
-class PdpCsbSubSequence(uvm_sequence):
+class CsbSubSequence(uvm_sequence):
     """Sends one CsbTransaction to the CsbAgent sequencer."""
 
     def __init__(self, name, csb_tx):
@@ -88,7 +87,6 @@ class PdpCsbSubSequence(uvm_sequence):
     async def body(self):
         await self.start_item(self.csb_tx)
         await self.finish_item(self.csb_tx)
-
 
 # ══════════════════════════════════════════════════════════════════════
 #  PDP VIRTUAL SEQUENCE
@@ -215,10 +213,10 @@ class PdpTestSequence(NVDLASequenceBase):
             csb_tx.expected_output_data        = expected_bytes
 
             # ---- Dispatch: data first, then CSB ----
-            data_sub = PdpDataSubSequence(f"pdp_data_sub_{i}", data_tx)
+            data_sub = DataSubSequence(f"pdp_data_sub_{i}", data_tx)
             await data_sub.start(self.sequencer.data_sqr)
 
-            csb_sub = PdpCsbSubSequence(f"pdp_csb_sub_{i}", csb_tx)
+            csb_sub = CsbSubSequence(f"pdp_csb_sub_{i}", csb_tx)
             await csb_sub.start(self.sequencer.csb_sqr)
 
             # ---- Wait for scoreboard to confirm check complete ----
@@ -226,32 +224,7 @@ class PdpTestSequence(NVDLASequenceBase):
             print(f"PDP iteration {i} checked by scoreboard.")
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  CONV SUB-SEQUENCES
-# ══════════════════════════════════════════════════════════════════════
 
-class ConvDataSubSequence(uvm_sequence):
-    """Sends one DataTransaction to the DataAgent sequencer."""
-
-    def __init__(self, name, data_tx):
-        super().__init__(name)
-        self.data_tx = data_tx
-
-    async def body(self):
-        await self.start_item(self.data_tx)
-        await self.finish_item(self.data_tx)
-
-
-class ConvCsbSubSequence(uvm_sequence):
-    """Sends one CsbTransaction to the CsbAgent sequencer."""
-
-    def __init__(self, name, csb_tx):
-        super().__init__(name)
-        self.csb_tx = csb_tx
-
-    async def body(self):
-        await self.start_item(self.csb_tx)
-        await self.finish_item(self.csb_tx)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -280,16 +253,28 @@ class ConvTestSequence(NVDLASequenceBase):
         self.config_file = config_file
 
     def _input_to_hwc_bytes(self, input_data):
-        """Convert CHW int8 array to flat HWC byte list, atom-padded per pixel."""
+        """
+        Convert CHW int8 array to NVDLA feature-cube (surface-planar) byte list.
+
+        NVDLA DC feature format stores data surface-by-surface:
+          Surface 0 (channels 0-7):  all H×W pixels, each 8 bytes (1 atom)
+          Surface 1 (channels 8-15): all H×W pixels, each 8 bytes
+          ...
+        Within each surface, data is row-major (W varies fastest).
+        """
         C, H, W     = input_data.shape
-        atoms       = max(1, (C * self.BPE + self.ATOM - 1) // self.ATOM)
-        pixel_bytes = atoms * self.ATOM
+        num_surfaces = max(1, (C * self.BPE + self.ATOM - 1) // self.ATOM)
         buf = []
-        for h in range(H):
-            for w in range(W):
-                for c in range(C):
-                    buf.append(int(input_data[c, h, w]) & 0xFF)
-                buf.extend([0] * (pixel_bytes - C * self.BPE))
+        for s in range(num_surfaces):
+            c_start = s * self.ATOM
+            c_end   = min(c_start + self.ATOM, C)
+            for h in range(H):
+                for w in range(W):
+                    for c in range(c_start, c_end):
+                        buf.append(int(input_data[c, h, w]) & 0xFF)
+                    # Pad to full atom (8 bytes)
+                    buf.extend([0] * (self.ATOM - (c_end - c_start)))
+        pixel_bytes = self.ATOM  # per-surface pixel size
         return buf, pixel_bytes
 
     async def body(self):
@@ -328,7 +313,7 @@ class ConvTestSequence(NVDLASequenceBase):
         in_total  = in_h * in_w * in_pixel
 
         out_atoms = max(1, (num_kernels * self.BPE + self.ATOM - 1) // self.ATOM)
-        out_pixel = out_atoms * self.ATOM
+        out_pixel_total = out_atoms * self.ATOM  # total output bytes per pixel
 
         # ---- DRAM address plan ----
         input_base  = 0
@@ -352,7 +337,9 @@ class ConvTestSequence(NVDLASequenceBase):
             weight_bytes = strategy.format_weights_for_nvdla(weight_data)
             self.write_hex_file(self.weight_file, weight_bytes)
 
-            # ---- Expected output in HWC flat bytes ----
+            # ---- Expected output in flat byte order ----
+            # For 1×1 spatial (or single output surface), surfaces are contiguous
+            # in DRAM. Read pixel-by-pixel, only the valid K data bytes.
             K, OH, OW = expected.shape
             expected_list = []
             for oh in range(OH):
@@ -377,17 +364,157 @@ class ConvTestSequence(NVDLASequenceBase):
             )
             csb_tx.output_base_addr            = output_base
             csb_tx.output_num_pixels           = out_h * out_w
-            csb_tx.output_pixel_bytes          = out_pixel
+            csb_tx.output_pixel_bytes          = out_pixel_total
             csb_tx.output_data_bytes_per_pixel = num_kernels * self.BPE
             csb_tx.expected_output_data        = expected_list
 
             # ---- Dispatch: data first, then CSB ----
-            data_sub = ConvDataSubSequence(f"conv_data_sub_{i}", data_tx)
+            data_sub = DataSubSequence(f"conv_data_sub_{i}", data_tx)
             await data_sub.start(self.sequencer.data_sqr)
 
-            csb_sub = ConvCsbSubSequence(f"conv_csb_sub_{i}", csb_tx)
+            csb_sub = CsbSubSequence(f"conv_csb_sub_{i}", csb_tx)
             await csb_sub.start(self.sequencer.csb_sqr)
 
             # ---- Wait for scoreboard to confirm check complete ----
             await bfm.iteration_done_queue.get()
             print(f"Conv iteration {i} checked by scoreboard.")
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  FC (FULLY-CONNECTED) VIRTUAL SEQUENCE
+# ══════════════════════════════════════════════════════════════════════
+
+class FcTestSequence(NVDLASequenceBase):
+    """
+    Virtual sequence for NVDLA fully-connected (dense) layer tests.
+
+    FC layers are mapped to the convolution engine as 1×1 direct convolutions:
+        input_features  → C channels, 1×1 spatial
+        output_features → K kernels,  1×1 kernel
+
+    Hardware pipeline: CDMA → CSC → CMAC_A/B → CACC → SDP (passthrough)
+
+    Each iteration:
+        1. Generates random input vector + weight matrix, computes golden output
+        2. Writes atom-padded hex files to disk (input and weights)
+        3. Sends DataTransaction → DataAgent  (loads DRAM)
+        4. Sends CsbTransaction  → CsbAgent   (programs hardware)
+        5. Waits for scoreboard to signal iteration complete
+    """
+
+    BPE        = 1   # INT8 only
+    ITERATIONS = 2
+
+    def __init__(self, name, input_file=None, weight_file=None, config_file=None):
+        super().__init__(name)
+        self.input_file  = input_file
+        self.weight_file = weight_file
+        self.config_file = config_file
+
+    def _input_to_hwc_bytes(self, input_data):
+        """
+        Convert CHW int8 array to NVDLA feature-cube (surface-planar) byte list.
+        Identical to ConvTestSequence's method.
+        """
+        C, H, W     = input_data.shape
+        num_surfaces = max(1, (C * self.BPE + self.ATOM - 1) // self.ATOM)
+        buf = []
+        for s in range(num_surfaces):
+            c_start = s * self.ATOM
+            c_end   = min(c_start + self.ATOM, C)
+            for h in range(H):
+                for w in range(W):
+                    for c in range(c_start, c_end):
+                        buf.append(int(input_data[c, h, w]) & 0xFF)
+                    buf.extend([0] * (self.ATOM - (c_end - c_start)))
+        pixel_bytes = self.ATOM
+        return buf, pixel_bytes
+
+    async def body(self):
+        from strategy.fc_strategy import FullyConnectedStrategy
+
+        strategy = LayerFactory.create_strategy('fully_connected')
+        reg_cfg  = RegistrationConfigs()
+        fc_config = self.load_yaml_config()
+        bfm      = NvdlaBFM()
+
+        # ---- Translate FC → Conv dimensions ----
+        conv_config     = FullyConnectedStrategy.fc_to_conv_config(fc_config)
+        input_features  = fc_config['input_features']
+        output_features = fc_config['output_features']
+
+        # Spatial is always 1×1 for FC
+        in_h, in_w = 1, 1
+        out_h, out_w = 1, 1
+        num_ch      = input_features
+        num_kernels = output_features
+
+        # ---- Memory layout ----
+        in_atoms  = max(1, (num_ch      * self.BPE + self.ATOM - 1) // self.ATOM)
+        in_pixel  = in_atoms * self.ATOM
+        in_total  = in_h * in_w * in_pixel
+
+        out_atoms = max(1, (num_kernels * self.BPE + self.ATOM - 1) // self.ATOM)
+        out_pixel_total = out_atoms * self.ATOM
+
+        # ---- DRAM address plan ----
+        input_base  = 0
+        weight_base = self.align_to_256(in_total)
+        nkg     = (num_kernels + 7) // 8
+        ncg     = (num_ch + 7) // 8
+        wt_raw  = nkg * 1 * 1 * ncg * 8 * 8   # 1×1 kernel
+        wt_size = max(128, ((wt_raw + 127) // 128) * 128)
+        output_base = self.align_to_256(weight_base + wt_size)
+
+        for i in range(self.ITERATIONS):
+            # ---- Generate stimulus ----
+            input_data  = strategy.generate_input_data(fc_config)
+            weight_data = strategy.generate_weight_data(fc_config)
+            expected    = strategy.compute_golden(input_data, fc_config, weight_data)
+
+            # ---- Write hex files ----
+            input_bytes, _ = self._input_to_hwc_bytes(input_data)
+            self.write_hex_file(self.input_file, input_bytes)
+
+            weight_bytes = strategy.format_weights_for_nvdla(weight_data)
+            self.write_hex_file(self.weight_file, weight_bytes)
+
+            # ---- Expected output in flat byte order ----
+            K, OH, OW = expected.shape
+            expected_list = []
+            for oh in range(OH):
+                for ow in range(OW):
+                    for k in range(K):
+                        expected_list.append(int(expected[k, oh, ow]) & 0xFF)
+
+            # ---- Build DataTransaction ----
+            data_tx = DataTransaction(f"fc_data_tx_{i}", strategy)
+            data_tx.input_file       = self.input_file
+            data_tx.input_base_addr  = input_base
+            data_tx.weight_file      = self.weight_file
+            data_tx.weight_base_addr = weight_base
+
+            # ---- Build CsbTransaction (uses conv registers via FC mapping) ----
+            csb_tx = CsbTransaction(f"fc_csb_tx_{i}", strategy)
+            csb_tx.reg_configs = reg_cfg.fullyConnected_configs(
+                fc_config,
+                input_addr  = input_base,
+                weight_addr = weight_base,
+                output_addr = output_base,
+            )
+            csb_tx.output_base_addr            = output_base
+            csb_tx.output_num_pixels           = out_h * out_w
+            csb_tx.output_pixel_bytes          = out_pixel_total
+            csb_tx.output_data_bytes_per_pixel = num_kernels * self.BPE
+            csb_tx.expected_output_data        = expected_list
+
+            # ---- Dispatch: data first, then CSB ----
+            data_sub = DataSubSequence(f"fc_data_sub_{i}", data_tx)
+            await data_sub.start(self.sequencer.data_sqr)
+
+            csb_sub = CsbSubSequence(f"fc_csb_sub_{i}", csb_tx)
+            await csb_sub.start(self.sequencer.csb_sqr)
+
+            # ---- Wait for scoreboard to confirm check complete ----
+            await bfm.iteration_done_queue.get()
+            print(f"FC iteration {i} checked by scoreboard.")
