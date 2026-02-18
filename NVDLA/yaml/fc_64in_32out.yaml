@@ -1,0 +1,29 @@
+# ═══════════════════════════════════════════════════════════════════
+# NVDLA Fully-Connected (Dense) Layer — larger test
+#
+# FC layer: 64 inputs → 32 outputs with clip_truncate=4
+#
+# This tests a larger FC layer where the accumulation values are
+# larger, requiring truncation to fit in INT8.
+#
+# Hardware pipeline: CDMA → CSC → CMAC_A/B → CACC → SDP (passthrough)
+# ═══════════════════════════════════════════════════════════════════
+
+test_suite:
+  - name: "NVDLA_FC_64in_32out"
+    description: "Fully-connected: 64 inputs → 32 outputs, INT8, truncate=4"
+
+    layers:
+      - type: "fully_connected"
+        config:
+          # --- FC dimensions ---
+          input_features: 64          # number of input neurons
+          output_features: 32         # number of output neurons
+
+          # --- data generation ---
+          data_range: [-10, 10]
+          weight_range: [-5, 5]
+          data_format: "INT8"
+
+          # --- CACC truncation ---
+          clip_truncate: 4            # right-shift by 4 to prevent saturation

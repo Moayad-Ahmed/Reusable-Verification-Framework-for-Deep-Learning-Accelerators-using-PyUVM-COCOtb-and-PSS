@@ -1,0 +1,38 @@
+# ═══════════════════════════════════════════════════════════════════
+# NVDLA Fully-Connected (Dense) Layer — mapped to conv engine
+#
+# A fully-connected layer with N inputs and M outputs is equivalent
+# to a 1×1 direct convolution:
+#   Input:  1×1 spatial, N channels (one "pixel" holds the entire vector)
+#   Weight: M kernels × N channels × 1×1 kernel
+#   Output: 1×1 spatial, M channels (one output neuron per kernel)
+#
+# Hardware pipeline: CDMA → CSC → CMAC_A/B → CACC → SDP (passthrough)
+# SDP is configured in flying mode with all sub-units bypassed.
+#
+# Example: FC layer with 16 inputs → 8 outputs
+#   input_features  = 16   →  num_channels = 16
+#   output_features = 8    →  num_kernels  = 8
+#
+# Golden model:
+#   out[k] = clamp( sum(input[c]*weight[k][c]) >> clip_truncate, -128, 127)
+# ═══════════════════════════════════════════════════════════════════
+
+test_suite:
+  - name: "NVDLA_FC_16in_8out_simple"
+    description: "Fully-connected: 16 inputs → 8 outputs, INT8, no truncation"
+
+    layers:
+      - type: "fully_connected"
+        config:
+          # --- FC dimensions ---
+          input_features: 16          # number of input neurons
+          output_features: 8          # number of output neurons
+
+          # --- data generation ---
+          data_range: [-5, 5]         # small values to avoid overflow
+          weight_range: [-3, 3]
+          data_format: "INT8"
+
+          # --- CACC truncation ---
+          clip_truncate: 0            # no right-shift

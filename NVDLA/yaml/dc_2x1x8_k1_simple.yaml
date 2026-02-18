@@ -46,4 +46,4 @@ test_suite:
           dilation_y: 1
 
           # --- CACC truncation ---
-          clip_truncate: 0              # no right-shift
+          clip_truncate: 3              # no right-shift

@@ -1,0 +1,30 @@
+# =====================================================================
+# NVDLA Fully-Connected (Dense) Layer -- minimal test
+#
+# Smallest practical FC: 8 inputs (1 channel group) -> 1 output
+# Mapped to 1x1 direct convolution with C=8, K=1.
+#
+# Hardware pipeline: CDMA -> CSC -> CMAC_A/B -> CACC -> SDP (passthrough)
+#
+# Golden model:
+#   out[0] = clamp( sum(input[c]*weight[c] for c in 0..7), -128, 127 )
+# =====================================================================
+
+test_suite:
+  - name: "NVDLA_FC_8in_1out_simple"
+    description: "Fully-connected: 8 inputs, 1 output, INT8, no truncation"
+
+    layers:
+      - type: "fully_connected"
+        config:
+          # --- FC dimensions ---
+          input_features: 8           # one channel group (1 atom)
+          output_features: 1          # single output neuron
+
+          # --- data generation ---
+          data_range: [-5, 5]         # small values to avoid overflow
+          weight_range: [-3, 3]
+          data_format: "INT8"
+
+          # --- CACC truncation ---
+          clip_truncate: 0            # no right-shift
