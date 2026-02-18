@@ -70,7 +70,7 @@ class PoolingStrategy(LayerStrategy):
         
         if error_messages:
             raise ValueError(
-                "❌ POOLING CONFIGURATION ERROR - Incompatible dimensions:\n\n" + 
+                " POOLING CONFIGURATION ERROR - Incompatible dimensions:\n\n" + 
                 "\n\n".join(error_messages) + 
                 "\n\nThe sliding window cannot reach the edge perfectly.\n" +
                 "Use formula: (padded_dimension - kernel_size) % stride = 0"
