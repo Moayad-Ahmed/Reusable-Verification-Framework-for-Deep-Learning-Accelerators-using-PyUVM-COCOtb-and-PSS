@@ -4,12 +4,15 @@ from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles, RisingEdge
 from pyuvm import *
 from pyuvm_components.env import NVDLA_Env
-from pyuvm_components.sequences import PdpTestSequence, ConvTestSequence
-
+from pyuvm_components.sequences import (
+    NVDLAVirtualSequencer,
+    PdpTestSequence,
+    ConvTestSequence,
+)
 import os
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-INPUT_DIR = os.path.join(BASE_DIR, "..", "input_files")
+BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
+INPUT_DIR  = os.path.join(BASE_DIR, "..", "input_files")
 CONFIG_DIR = os.path.join(BASE_DIR, "..", "yaml")
 
 
@@ -21,40 +24,58 @@ def config_file_path(filename):
     return os.path.join(CONFIG_DIR, filename)
 
 
-# ------------------------------------------------------------------ #
-#  Base class — common clock setup, env, objection logic             #
-# ------------------------------------------------------------------ #
+# ══════════════════════════════════════════════════════════════════════
+#  BASE TEST
+# ══════════════════════════════════════════════════════════════════════
 
-class PdpTestBase(uvm_test):
-    """Base class for all PDP pooling tests."""
+class NVDLATestBase(uvm_test):
+    """
+    Common base class for all NVDLA tests.
 
-    # Subclasses override these two class attributes
-    YAML_FILE = None        # e.g. "4x4_max_k2_s2.yaml"
-    DAT_FILE  = None        # e.g. "4x4_max_k2_s2_in.dat"
+    build_phase         : creates NVDLA_Env (DataAgent + CsbAgent + Scoreboard)
+    end_of_elaboration  : builds the NVDLAVirtualSequencer which retrieves both
+                          sub-sequencers from ConfigDB (registered by the agents)
+    run_phase           : starts clocks, runs the virtual sequence on vseqr,
+                          waits for dla_intr, then drops objection
+    """
+
+    YAML_FILE = None
+    DAT_FILE  = None
 
     def build_phase(self):
         self.env = NVDLA_Env("NVDLA_Env", self)
 
     def end_of_elaboration_phase(self):
-        self.sqr = ConfigDB().get(None, "", "SEQR")
+        # Instantiate the virtual sequencer and manually wire in both
+        # sub-sequencer references from ConfigDB.
+        # This must happen in end_of_elaboration_phase (not build_phase)
+        # so that both agents have already registered their sequencers.
+        self.vseqr = NVDLAVirtualSequencer("vseqr", self)
+        self.vseqr.data_sqr = ConfigDB().get(self, "", "DATA_SEQR")
+        self.vseqr.csb_sqr  = ConfigDB().get(self, "", "CSB_SEQR")
+
+    async def _start_clocks(self):
+        """Start DLA core and CSB clocks at 20 ns period (50 MHz)."""
+        cocotb.start_soon(Clock(cocotb.top.dla_core_clk, 20, unit="ns").start())
+        cocotb.start_soon(Clock(cocotb.top.dla_csb_clk,  20, unit="ns").start())
+
+    def _create_sequence(self):
+        """Subclasses return the correct virtual sequence instance."""
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement _create_sequence()"
+        )
 
     async def run_phase(self):
-        cocotb.start_soon(
-            Clock(cocotb.top.dla_core_clk, 20, unit="ns").start()
-        )
-        cocotb.start_soon(
-            Clock(cocotb.top.dla_csb_clk, 20, unit="ns").start()
-        )
-
-        pdp_test = PdpTestSequence(
-            "pdp_test",
-            input_file=input_file_path(self.DAT_FILE),
-            config_file=config_file_path(self.YAML_FILE),
-        )
+        await self._start_clocks()
+        seq = self._create_sequence()
 
         self.raise_objection()
-        await pdp_test.start(self.sqr)
+        # Start the virtual sequence on the virtual sequencer.
+        # Internally it dispatches DataTransactions to data_sqr and
+        # CsbTransactions to csb_sqr in the correct order each iteration.
+        await seq.start(self.vseqr)
 
+        # Wait for final NVDLA interrupt then allow output to settle
         while cocotb.top.dla_intr.value != 1:
             await RisingEdge(cocotb.top.dla_core_clk)
 
@@ -62,13 +83,26 @@ class PdpTestBase(uvm_test):
         self.drop_objection()
 
 
-# ------------------------------------------------------------------ #
-#  Concrete test classes — one per YAML configuration                #
-# ------------------------------------------------------------------ #
+# ══════════════════════════════════════════════════════════════════════
+#  PDP BASE
+# ══════════════════════════════════════════════════════════════════════
+
+class PdpTestBase(NVDLATestBase):
+    """Base class for all PDP pooling tests."""
+
+    def _create_sequence(self):
+        return PdpTestSequence(
+            "pdp_test",
+            input_file=input_file_path(self.DAT_FILE),
+            config_file=config_file_path(self.YAML_FILE),
+        )
+
+
+# ── Concrete PDP tests ─────────────────────────────────────────────
 
 @pyuvm.test()
 class PdpBasicTest(PdpTestBase):
-    """Default test — uses nvdla_pooling_config.yaml"""
+    """Default pooling test — nvdla_pooling_config.yaml"""
     YAML_FILE = "nvdla_pooling_config.yaml"
     DAT_FILE  = "pdp_default_in.dat"
 
@@ -114,17 +148,20 @@ class Pdp_5x5_MAX_k3_s1_pad1(PdpTestBase):
     YAML_FILE = "5x5_max_k3_s1_pad1.yaml"
     DAT_FILE  = "pdp_5x5_max_k3_s1_pad1_in.dat"
 
+
 @pyuvm.test()
 class Pdp_6x6_MAX_k3_s1_pad2_valm64(PdpTestBase):
-    """6x6 Max Pooling, kernel=3, stride=1, pad=2, pad_value=-64 → 8x8 output"""
+    """6x6 Max Pooling, kernel=3, stride=1, pad=2, pad_value=-64"""
     YAML_FILE = "6x6_max_k3_s1_pad2_valm64.yaml"
     DAT_FILE  = "pdp_6x6_max_k3_s1_pad2_valm64_in.dat"
 
+
 @pyuvm.test()
 class Pdp_4x4_AVG_k3_s2_pad3(PdpTestBase):
-    """4x4 Avg Pooling, kernel=3, stride=2, pad=3, pad_value=-64 → 4x4 output"""
+    """4x4 Avg Pooling, kernel=3, stride=2, pad=3"""
     YAML_FILE = "4x4_avg_k3_s2_pad3.yaml"
     DAT_FILE  = "pdp_4x4_avg_k3_s2_pad3_in.dat"
+
 
 @pyuvm.test()
 class Pdp_4x4_max_k2_s2_4ch(PdpTestBase):
@@ -134,68 +171,40 @@ class Pdp_4x4_max_k2_s2_4ch(PdpTestBase):
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  CONVOLUTION TESTS
+#  CONV BASE
 # ══════════════════════════════════════════════════════════════════════
 
-class ConvTestBase(uvm_test):
+class ConvTestBase(NVDLATestBase):
     """
     Base class for all NVDLA convolution tests.
 
-    The convolution pipeline (CDMA→CSC→CMAC_A/B→CACC) always outputs
-    through SDP, which is configured as a transparent passthrough.
-    The result in DRAM is the raw convolution-only output.
+    Convolution pipeline: CDMA → CSC → CMAC_A/B → CACC → SDP (passthrough).
+    The result in DRAM is the raw convolution-truncation output.
     """
+    WT_FILE = None
 
-    # Subclasses override these
-    YAML_FILE   = None
-    DAT_FILE    = None     # input .dat
-    WT_FILE     = None     # weight .dat
-
-    def build_phase(self):
-        self.env = NVDLA_Env("NVDLA_Env", self)
-
-    def end_of_elaboration_phase(self):
-        self.sqr = ConfigDB().get(None, "", "SEQR")
-
-    async def run_phase(self):
-        cocotb.start_soon(
-            Clock(cocotb.top.dla_core_clk, 20, unit="ns").start()
-        )
-        cocotb.start_soon(
-            Clock(cocotb.top.dla_csb_clk, 20, unit="ns").start()
-        )
-
-        conv_test = ConvTestSequence(
+    def _create_sequence(self):
+        return ConvTestSequence(
             "conv_test",
             input_file=input_file_path(self.DAT_FILE),
             weight_file=input_file_path(self.WT_FILE),
             config_file=config_file_path(self.YAML_FILE),
         )
 
-        self.raise_objection()
-        await conv_test.start(self.sqr)
 
-        while cocotb.top.dla_intr.value != 1:
-            await RisingEdge(cocotb.top.dla_core_clk)
-
-        await ClockCycles(cocotb.top.dla_core_clk, 1000)
-        self.drop_objection()
-
-
-# ------------------------------------------------------------------ #
-#  Concrete convolution test classes                                  #
-# ------------------------------------------------------------------ #
+# ── Concrete convolution tests ────────────────────────────────────────
 
 @pyuvm.test()
 class Conv_DC_1x1x8_k1(ConvTestBase):
-    """Simple 1×1 DC conv: 8 input channels, 1 kernel, no truncation"""
+    """1×1 DC conv: 8 input channels, 1 kernel, no truncation"""
     YAML_FILE = "dc_1x1x8_k1_simple.yaml"
     DAT_FILE  = "conv_1x1x8_k1_in.dat"
     WT_FILE   = "conv_1x1x8_k1_wt.dat"
 
+
 @pyuvm.test()
 class Conv_DC_2x1x8_k1(ConvTestBase):
-    """Simple 2×1 DC conv: 8 input channels, 1 kernel, no truncation"""
+    """2×1 DC conv: 8 input channels, 1 kernel, no truncation"""
     YAML_FILE = "dc_2x1x8_k1_simple.yaml"
     DAT_FILE  = "conv_2x1x8_k1_in.dat"
     WT_FILE   = "conv_2x1x8_k1_wt.dat"
