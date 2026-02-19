@@ -1,0 +1,194 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║           NVDLA CDP & CDP_RDMA CONFIGURATION REFERENCE                       ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+SEQUENCE: Status→Pointer→RDMA_Config→CDP_Config→LUT_Setup→Enable_RDMA→Enable_CDP→Monitor
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 1. STATUS & CONTROL                                                          │
+├────────────────────────────┬────────────┬────────────┬─────────────────────────┤
+│ Register                   │ RDMA Addr  │ CDP Addr   │ Value / Usage           │
+├────────────────────────────┼────────────┼────────────┼─────────────────────────┤
+│ S_STATUS (RO)              │ 0xC000     │ 0xD000     │ [1:0]=G0, [17:16]=G1    │
+│                            │            │            │ 0=IDLE, 1=RUN, 2=PEND   │
+│                            │            │            │ Poll until idle         │
+├────────────────────────────┼────────────┼────────────┼─────────────────────────┤
+│ S_POINTER (set first)      │ 0xC004     │ 0xD004     │ [0]: 0=Group0, 1=Group1 │
+├────────────────────────────┼────────────┼────────────┼─────────────────────────┤
+│ D_OP_ENABLE (set last)     │ 0xC008     │ 0xD048     │ 0x1=START (RDMA first)  │
+└────────────────────────────┴────────────┴────────────┴─────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 2. INPUT DATA CUBE DIMENSIONS (RDMA Only) - [12:0] = actual_value - 1       │
+├────────────────────────────────┬────────────┬────────────────────────────────┤
+│ Register                       │ RDMA Addr  │ Range (0~8191 → 1~8192)       │
+├────────────────────────────────┼────────────┼────────────────────────────────┤
+│ D_DATA_CUBE_WIDTH              │ 0xC00C     │ Width-1                        │
+│ D_DATA_CUBE_HEIGHT             │ 0xC010     │ Height-1                       │
+│ D_DATA_CUBE_CHANNEL            │ 0xC014     │ Channels-1                     │
+└────────────────────────────────┴────────────┴────────────────────────────────┘
+NOTE: CDP does NOT have separate data cube dimension registers.
+      Dimensions are set only via CDP_RDMA. The CDP core receives
+      data streamed from the RDMA and uses its internal control logic.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 3. DATA FORMAT & OPERATION MODE                                              │
+├────────────────────────────────┬──────────┬──────────┬──────────────────────┤
+│ D_DATA_FORMAT [1:0]            │ 0xC034   │ 0xD068   │ 0=INT8, 1=INT16,     │
+│   (RDMA: INPUT_DATA)           │          │          │ 2=FP16               │
+│   (CDP: INPUT_DATA_TYPE)       │          │          │                      │
+├────────────────────────────────┼──────────┼──────────┼──────────────────────┤
+│ D_OPERATION_MODE (RDMA) [1:0]  │ 0xC030   │ -        │ 0=READPHILE          │
+│   (RO in v1.0, always 0)      │          │          │ 1=WRITEPHILE         │
+│                                │          │          │ 2=ORDINARY           │
+├────────────────────────────────┼──────────┼──────────┼──────────────────────┤
+│ D_FUNC_BYPASS (CDP) [1:0]      │ -        │ 0xD04C   │ [0]=SqSum bypass     │
+│                                │          │          │ [1]=Mul bypass       │
+│                                │          │          │ 0=disable bypass     │
+│                                │          │          │ 1=enable bypass      │
+└────────────────────────────────┴──────────┴──────────┴──────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 4. LOCAL RESPONSE NORMALIZATION CONFIG (CDP Only)                            │
+├────────────────────────────────┬──────────┬────────────────────────────────┤
+│ D_LRN_CFG [1:0]               │ 0xD070   │ Normalization length:          │
+│   NORMALZ_LEN                  │          │  0=LEN3, 1=LEN5, 2=LEN7,      │
+│                                │          │  3=LEN9                        │
+└────────────────────────────────┴──────────┴────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 5. INPUT DATA CONVERSION (CDP Only)                                          │
+├────────────────────────────────┬──────────┬────────────────────────────────┤
+│ D_DATIN_OFFSET [15:0]          │ 0xD074   │ Signed offset for input cvt    │
+│ D_DATIN_SCALE [15:0]           │ 0xD078   │ Signed scale (reset=1)         │
+│ D_DATIN_SHIFTER [4:0]          │ 0xD07C   │ Unsigned shift factor          │
+└────────────────────────────────┴──────────┴────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 6. OUTPUT DATA CONVERSION (CDP Only)                                         │
+├────────────────────────────────┬──────────┬────────────────────────────────┤
+│ D_DATOUT_OFFSET [31:0]         │ 0xD080   │ Signed offset for output cvt   │
+│ D_DATOUT_SCALE [15:0]          │ 0xD084   │ Signed scale (reset=1)         │
+│ D_DATOUT_SHIFTER [5:0]         │ 0xD088   │ Unsigned shift factor          │
+└────────────────────────────────┴──────────┴────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 7. SOURCE MEMORY (RDMA Only)                                                 │
+├────────────────────────────────┬──────────┬────────────────────────────────┤
+│ D_SRC_BASE_ADDR_LOW [31:0]     │ 0xC018   │ Source address low             │
+│ D_SRC_BASE_ADDR_HIGH [31:0]    │ 0xC01C   │ Source address high            │
+│ D_SRC_LINE_STRIDE [31:0]       │ 0xC020   │ Bytes between lines            │
+│ D_SRC_SURFACE_STRIDE [31:0]    │ 0xC024   │ Bytes between surfaces         │
+│ D_SRC_DMA_CFG [0]              │ 0xC028   │ 0=CV(SRAM), 1=MC(ext mem)     │
+│ D_SRC_COMPRESSION_EN [0] (RO)  │ 0xC02C   │ Always 0 in NVDLA v1.0        │
+└────────────────────────────────┴──────────┴────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 8. DESTINATION MEMORY (CDP Only)                                             │
+├────────────────────────────────┬──────────┬────────────────────────────────┤
+│ D_DST_BASE_ADDR_LOW [31:0]     │ 0xD050   │ Dest address low               │
+│ D_DST_BASE_ADDR_HIGH [31:0]    │ 0xD054   │ Dest address high              │
+│ D_DST_LINE_STRIDE [31:0]       │ 0xD058   │ Bytes between lines            │
+│ D_DST_SURFACE_STRIDE [31:0]    │ 0xD05C   │ Bytes between surfaces         │
+│ D_DST_DMA_CFG [0]              │ 0xD060   │ 0=CV(SRAM), 1=MC(ext mem)     │
+│ D_DST_COMPRESSION_EN [0] (RO)  │ 0xD064   │ Always 0 in NVDLA v1.0        │
+└────────────────────────────────┴──────────┴────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 9. NaN HANDLING (CDP Only, FP16 mode)                                        │
+├────────────────────────────────┬──────────┬────────────────────────────────┤
+│ D_NAN_FLUSH_TO_ZERO [0]        │ 0xD06C   │ 0=Keep NaN, 1=Flush to zero   │
+└────────────────────────────────┴──────────┴────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 10. LUT CONFIGURATION (CDP Only, S_ prefix = not dual-grouped)               │
+├────────────────────────────────┬──────────┬────────────────────────────────┤
+│ S_LUT_ACCESS_CFG               │ 0xD008   │ [9:0]=LUT_ADDR                │
+│                                │          │ [16]=TABLE_ID: 0=LE, 1=LO     │
+│                                │          │ [17]=ACCESS_TYPE: 0=RD, 1=WR  │
+├────────────────────────────────┼──────────┼────────────────────────────────┤
+│ S_LUT_ACCESS_DATA [15:0]       │ 0xD00C   │ LUT read/write data (signed)  │
+├────────────────────────────────┼──────────┼────────────────────────────────┤
+│ S_LUT_CFG                      │ 0xD010   │ [0]=LE func: 0=EXP, 1=LINEAR │
+│                                │          │ [4]=UFLOW pri: 0=LE, 1=LO    │
+│                                │          │ [5]=OFLOW pri: 0=LE, 1=LO    │
+│                                │          │ [6]=HYBRID pri: 0=LE, 1=LO   │
+├────────────────────────────────┼──────────┼────────────────────────────────┤
+│ S_LUT_INFO                     │ 0xD014   │ [7:0]=LE index offset (signed)│
+│                                │          │ [15:8]=LE index select (signed)│
+│                                │          │ [23:16]=LO index select(signed)│
+├────────────────────────────────┼──────────┼────────────────────────────────┤
+│ S_LUT_LE_START_LOW [31:0]      │ 0xD018   │ LE table start (low 32 bits)  │
+│ S_LUT_LE_START_HIGH [5:0]      │ 0xD01C   │ LE table start (high 6 bits)  │
+│ S_LUT_LE_END_LOW [31:0]        │ 0xD020   │ LE table end (low 32 bits)    │
+│ S_LUT_LE_END_HIGH [5:0]        │ 0xD024   │ LE table end (high 6 bits)    │
+├────────────────────────────────┼──────────┼────────────────────────────────┤
+│ S_LUT_LO_START_LOW [31:0]      │ 0xD028   │ LO table start (low 32 bits)  │
+│ S_LUT_LO_START_HIGH [5:0]      │ 0xD02C   │ LO table start (high 6 bits)  │
+│ S_LUT_LO_END_LOW [31:0]        │ 0xD030   │ LO table end (low 32 bits)    │
+│ S_LUT_LO_END_HIGH [5:0]        │ 0xD034   │ LO table end (high 6 bits)    │
+├────────────────────────────────┼──────────┼────────────────────────────────┤
+│ S_LUT_LE_SLOPE_SCALE           │ 0xD038   │ [15:0]=uflow scale (signed)   │
+│                                │          │ [31:16]=oflow scale (signed)   │
+│ S_LUT_LE_SLOPE_SHIFT           │ 0xD03C   │ [4:0]=uflow shift (signed)    │
+│                                │          │ [9:5]=oflow shift (signed)     │
+├────────────────────────────────┼──────────┼────────────────────────────────┤
+│ S_LUT_LO_SLOPE_SCALE           │ 0xD040   │ [15:0]=uflow scale (signed)   │
+│                                │          │ [31:16]=oflow scale (signed)   │
+│ S_LUT_LO_SLOPE_SHIFT           │ 0xD044   │ [4:0]=uflow shift (signed)    │
+│                                │          │ [9:5]=oflow shift (signed)     │
+└────────────────────────────────┴──────────┴────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 11. DEBUG & PERFORMANCE                                                      │
+├────────────────────────────────┬──────────┬──────────┬──────────────────────┤
+│ D_NAN_INPUT_NUM (RO)           │ -        │ 0xD08C   │ Input NaN count      │
+│ D_INF_INPUT_NUM (RO)           │ -        │ 0xD090   │ Input Inf count      │
+│ D_NAN_OUTPUT_NUM (RO)          │ -        │ 0xD094   │ Output NaN count     │
+│ D_OUT_SATURATION (RO)          │ -        │ 0xD098   │ Saturated elem count │
+├────────────────────────────────┼──────────┼──────────┼──────────────────────┤
+│ D_PERF_ENABLE                  │ 0xC038   │ 0xD09C   │ RDMA: [0]=DMA_EN     │
+│                                │          │          │ CDP: [0]=DMA_EN      │
+│                                │          │          │      [1]=LUT_EN      │
+├────────────────────────────────┼──────────┼──────────┼──────────────────────┤
+│ D_PERF_READ_STALL (RO)         │ 0xC03C   │ -        │ Read stall cycles    │
+│ D_PERF_WRITE_STALL (RO)        │ -        │ 0xD0A0   │ Write stall cycles   │
+│ D_PERF_LUT_UFLOW (RO)          │ -        │ 0xD0A4   │ LUT underflow count  │
+│ D_PERF_LUT_OFLOW (RO)          │ -        │ 0xD0A8   │ LUT overflow count   │
+│ D_PERF_LUT_HYBRID (RO)         │ -        │ 0xD0AC   │ LUT hybrid count     │
+│ D_PERF_LUT_LE_HIT (RO)         │ -        │ 0xD0B0   │ LE table hit count   │
+│ D_PERF_LUT_LO_HIT (RO)         │ -        │ 0xD0B4   │ LO table hit count   │
+├────────────────────────────────┼──────────┼──────────┼──────────────────────┤
+│ D_CYA [31:0]                   │ 0xC040   │ 0xD0B8   │ Debug/vendor reg     │
+└────────────────────────────────┴──────────┴──────────┴──────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+                     TYPICAL CONFIGURATION SEQUENCE
+═══════════════════════════════════════════════════════════════════════════════
+
+1. Poll status: while(read(0xC000)&0x3) {}, while(read(0xD000)&0x3) {}
+2. Set group:   write(0xC004, 0x0),  write(0xD004, 0x0)
+3. LUT setup:   Write S_LUT_ACCESS_CFG + S_LUT_ACCESS_DATA for all entries
+                Write S_LUT_CFG, S_LUT_INFO, Start/End, Slope regs
+4. RDMA config: Dims→Format→SrcMem→Op mode
+5. CDP config:  FuncBypass→DstMem→DataFormat→NaN→LRN→DatainCvt→DataoutCvt
+6. Enable:      write(0xC008, 0x1), write(0xD048, 0x1)  [RDMA first!]
+7. Monitor:     Poll status or wait interrupt
+
+═══════════════════════════════════════════════════════════════════════════════
+                    QUICK VALUE REFERENCE TABLE
+═══════════════════════════════════════════════════════════════════════════════
+
+STATUS:        0=IDLE, 1=RUNNING, 2=PENDING
+FORMAT:        0=INT8, 1=INT16, 2=FP16
+RAM_TYPE:      0=CV(on-chip SRAM), 1=MC(external memory)
+NORMALZ_LEN:   0=LEN3(3 chan), 1=LEN5(5 chan), 2=LEN7(7 chan), 3=LEN9(9 chan)
+LUT_TABLE_ID:  0=LE(linear/exponential), 1=LO(linear only)
+LUT_LE_FUNC:   0=EXPONENT, 1=LINEAR
+BYPASS:        0=DISABLE(normal operation), 1=ENABLE(bypass function)
+NAN_TO_ZERO:   0=DISABLE(keep NaN), 1=ENABLE(flush NaN to zero)
+COMPRESSION:   Always DISABLE in NVDLA v1.0
+
+═══════════════════════════════════════════════════════════════════════════════
+                              END OF GUIDE
+═══════════════════════════════════════════════════════════════════════════════

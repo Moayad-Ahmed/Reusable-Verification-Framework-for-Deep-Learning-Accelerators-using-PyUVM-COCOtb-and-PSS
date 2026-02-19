@@ -1,0 +1,639 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║       NVDLA CDP HARDWARE CONSTRAINTS & VERIFICATION GUIDE (nv_small)        ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+Derived from RTL analysis of the NVDLA nv_small CDP implementation.
+For use in constrained-random verification and directed test generation.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  SECTION 1: ARCHITECTURE CONSTANTS (nv_small)
+═══════════════════════════════════════════════════════════════════════════════
+
+  Parameter                    │ Value    │ Source
+  ─────────────────────────────┼──────────┼───────────────────────────
+  ATOM_SIZE (atomic_m)         │ 8 bytes  │ NVDLA_CDP_THROUGHPUT=1, 8B
+  AXI Data Width               │ 64 bits  │ NVDLA_MEMIF_WIDTH=64
+  AXI Address Width             │ 32 bits  │ NVDLA_MEM_ADDRESS_WIDTH=32
+  Throughput (tp)               │ 1        │ NVDLA_CDP_THROUGHPUT=1
+  Internal CVT Width (icvto)    │ 9 bits   │ NVDLA_CDP_ICVTO_BP=8+1=9
+  LUT LE Table Entries          │ 65       │ Fixed in spec
+  LUT LO Table Entries          │ 257      │ Fixed in spec
+  LUT Data Width                │ 16 bits  │ Fixed (signed)
+  Max DMA Burst AXI             │ 1 beat   │ nv_small: 1 atom per beat
+  Performance Counter Width     │ 32 bits  │ All perf counters
+  Dual Register Groups          │ 2        │ Group 0 and Group 1
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  SECTION 2: TESTBENCH / DRAM CONSTRAINTS
+═══════════════════════════════════════════════════════════════════════════════
+
+  Parameter                    │ Value    │ Notes
+  ─────────────────────────────┼──────────┼───────────────────────────
+  DRAM Size                     │ 1024 B   │ Testbench default (1 KB)
+  DRAM Addressable Range        │ 0x000-   │ Lower-bounded by 0
+                                │ 0x3FF    │ Upper-bounded by 1023
+  AXI Response                  │ OKAY     │ All reads/writes succeed
+  Clock Domain                  │ Single   │ nvdla_core_clk
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  SECTION 3: REGISTER FIELD RANGES (from .vh and RTL)
+═══════════════════════════════════════════════════════════════════════════════
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  CDP_RDMA Registers                                                     │
+  ├─────────────────────────────┬───────┬───────────────────────────────────┤
+  │  Field                      │ Width │ Range                             │
+  ├─────────────────────────────┼───────┼───────────────────────────────────┤
+  │  WIDTH                      │ 13b   │ 0 to 8191 (actual: 1 to 8192)   │
+  │  HEIGHT                     │ 13b   │ 0 to 8191 (actual: 1 to 8192)   │
+  │  CHANNEL                    │ 13b   │ 0 to 8191 (actual: 1 to 8192)   │
+  │  SRC_BASE_ADDR_LOW          │ 32b   │ 0x0000_0000 to 0xFFFF_FFFF      │
+  │  SRC_BASE_ADDR_HIGH         │ 32b   │ 0x0000_0000 to 0xFFFF_FFFF      │
+  │  SRC_LINE_STRIDE            │ 32b   │ Direct byte value               │
+  │  SRC_SURFACE_STRIDE         │ 32b   │ Direct byte value               │
+  │  SRC_RAM_TYPE               │ 1b    │ 0=CV, 1=MC                      │
+  │  INPUT_DATA                 │ 2b    │ 0=INT8, 1=INT16, 2=FP16         │
+  │  PERF_ENABLE                │ 1b    │ 0=off, 1=on                     │
+  ├─────────────────────────────┴───────┴───────────────────────────────────┤
+  │  CDP Core Registers                                                     │
+  ├─────────────────────────────┬───────┬───────────────────────────────────┤
+  │  Field                      │ Width │ Range                             │
+  ├─────────────────────────────┼───────┼───────────────────────────────────┤
+  │  LUT_ADDR                   │ 10b   │ 0 to 1023                       │
+  │  LUT_TABLE_ID               │ 1b    │ 0=LE, 1=LO                      │
+  │  LUT_ACCESS_TYPE            │ 1b    │ 0=READ, 1=WRITE                 │
+  │  LUT_DATA                   │ 16b   │ Signed 16-bit                   │
+  │  LUT_LE_FUNCTION            │ 1b    │ 0=EXPONENT, 1=LINEAR            │
+  │  LUT_UFLOW/OFLOW/HYBRID    │ 1b    │ 0=LE priority, 1=LO priority    │
+  │  LUT_LE_INDEX_OFFSET        │ 8b    │ Signed 8-bit                    │
+  │  LUT_LE_INDEX_SELECT        │ 8b    │ Signed (6b INT8/7b INT16/8b FP) │
+  │  LUT_LO_INDEX_SELECT        │ 8b    │ Signed (6b INT8/7b INT16/8b FP) │
+  │  LUT_LE/LO_START_LOW        │ 32b   │ Signed 32-bit                   │
+  │  LUT_LE/LO_START_HIGH       │ 6b    │ Signed 6-bit                    │
+  │  LUT_LE/LO_END_LOW          │ 32b   │ Signed 32-bit                   │
+  │  LUT_LE/LO_END_HIGH         │ 6b    │ Signed 6-bit                    │
+  │  SLOPE_UFLOW/OFLOW_SCALE    │ 16b   │ Signed 16-bit each             │
+  │  SLOPE_UFLOW/OFLOW_SHIFT    │ 5b    │ Signed 5-bit each              │
+  │  NORMALZ_LEN                │ 2b    │ 0=LEN3, 1=LEN5, 2=LEN7, 3=LEN9│
+  │  SQSUM_BYPASS               │ 1b    │ 0=off, 1=bypass sqsum          │
+  │  MUL_BYPASS                 │ 1b    │ 0=off, 1=bypass multiply       │
+  │  DATIN_OFFSET               │ 16b   │ Signed (8b INT8 / 16b INT16,FP)│
+  │  DATIN_SCALE                │ 16b   │ Signed 16-bit                   │
+  │  DATIN_SHIFTER              │ 5b    │ Unsigned 0-31                   │
+  │  DATOUT_OFFSET              │ 32b   │ Signed (25b INT8/32b INT16/FP) │
+  │  DATOUT_SCALE               │ 16b   │ Signed 16-bit                   │
+  │  DATOUT_SHIFTER             │ 6b    │ Unsigned 0-63                   │
+  │  NAN_TO_ZERO                │ 1b    │ 0=off, 1=flush NaN to zero     │
+  │  DST_BASE_ADDR_LOW          │ 32b   │ Full 32-bit address            │
+  │  DST_BASE_ADDR_HIGH         │ 32b   │ Full 32-bit address            │
+  │  DST_LINE_STRIDE            │ 32b   │ Direct byte value              │
+  │  DST_SURFACE_STRIDE         │ 32b   │ Direct byte value              │
+  │  DST_RAM_TYPE               │ 1b    │ 0=CV, 1=MC                     │
+  │  INPUT_DATA_TYPE             │ 2b    │ 0=INT8, 1=INT16, 2=FP16       │
+  │  DMA_EN                     │ 1b    │ 0=off, 1=on                    │
+  │  LUT_EN                     │ 1b    │ 0=off, 1=on                    │
+  └─────────────────────────────┴───────┴───────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  SECTION 4: CRITICAL HARDWARE CONSTRAINTS
+═══════════════════════════════════════════════════════════════════════════════
+
+  ╔═══════════════════════════════════════════════════════════════════════════╗
+  ║  C1. Memory Base Address Alignment                                       ║
+  ╠═══════════════════════════════════════════════════════════════════════════╣
+  ║  SRC_BASE_ADDR must be aligned to ATOM_SIZE (8 bytes)                    ║
+  ║  DST_BASE_ADDR must be aligned to ATOM_SIZE (8 bytes)                    ║
+  ║                                                                          ║
+  ║  Formula:                                                                ║
+  ║    SRC_BASE_ADDR_LOW % 8 == 0                                           ║
+  ║    DST_BASE_ADDR_LOW % 8 == 0                                           ║
+  ║                                                                          ║
+  ║  RTL evidence: RDMA_ig generates DMA addresses in ATOM-sized blocks.    ║
+  ║  Lower 3 bits of address are implicitly zero in the DMA request.        ║
+  ╚═══════════════════════════════════════════════════════════════════════════╝
+
+  ╔═══════════════════════════════════════════════════════════════════════════╗
+  ║  C2. Line Stride Constraints                                             ║
+  ╠═══════════════════════════════════════════════════════════════════════════╣
+  ║  SRC_LINE_STRIDE must be aligned to ATOM_SIZE (8 bytes)                  ║
+  ║  DST_LINE_STRIDE must be aligned to ATOM_SIZE (8 bytes)                  ║
+  ║                                                                          ║
+  ║  Minimum stride:                                                         ║
+  ║    INT8:  line_stride >= ceil((width+1) * 1 / 8) * 8                    ║
+  ║    INT16: line_stride >= ceil((width+1) * 2 / 8) * 8                    ║
+  ║    FP16:  line_stride >= ceil((width+1) * 2 / 8) * 8                    ║
+  ║                                                                          ║
+  ║  RTL evidence: RDMA_ig.v uses reg2dp_src_line_stride directly as byte   ║
+  ║  offset between lines. Misalignment causes incorrect data fetch.        ║
+  ╚═══════════════════════════════════════════════════════════════════════════╝
+
+  ╔═══════════════════════════════════════════════════════════════════════════╗
+  ║  C3. Surface Stride Constraints                                          ║
+  ╠═══════════════════════════════════════════════════════════════════════════╣
+  ║  SRC_SURFACE_STRIDE must be aligned to ATOM_SIZE (8 bytes)               ║
+  ║  DST_SURFACE_STRIDE must be aligned to ATOM_SIZE (8 bytes)               ║
+  ║                                                                          ║
+  ║  Minimum:                                                                ║
+  ║    surface_stride >= line_stride × (height + 1)                         ║
+  ║                                                                          ║
+  ║  Each surface holds one atomic_m-channel group of the data cube.        ║
+  ║  RTL evidence: RDMA_ig.v adds surface_stride after height iterations.   ║
+  ╚═══════════════════════════════════════════════════════════════════════════╝
+
+  ╔═══════════════════════════════════════════════════════════════════════════╗
+  ║  C4. Channel Grouping and Atomic Size                                    ║
+  ╠═══════════════════════════════════════════════════════════════════════════╣
+  ║  Channels are grouped in atomic_m = ATOM_SIZE / bytes_per_element       ║
+  ║    INT8:  atomic_m = 8 / 1 = 8 channels per atom                       ║
+  ║    INT16: atomic_m = 8 / 2 = 4 channels per atom                       ║
+  ║    FP16:  atomic_m = 8 / 2 = 4 channels per atom                       ║
+  ║                                                                          ║
+  ║  Number of surface iterations:                                          ║
+  ║    num_surfaces = ceil((channel + 1) / atomic_m)                        ║
+  ║                                                                          ║
+  ║  RTL evidence: RDMA_ig.v line ~70:                                      ║
+  ║    channel_count[12-3:0] for INT8 (divides channel by 8)               ║
+  ║    The last surface may have partial valid channels.                     ║
+  ╚═══════════════════════════════════════════════════════════════════════════╝
+
+  ╔═══════════════════════════════════════════════════════════════════════════╗
+  ║  C5. Data Format Consistency                                             ║
+  ╠═══════════════════════════════════════════════════════════════════════════╣
+  ║  CDP_RDMA D_DATA_FORMAT and CDP D_DATA_FORMAT MUST match.                ║
+  ║                                                                          ║
+  ║  Both must be set to the same value:                                    ║
+  ║    0x0 (INT8), 0x1 (INT16), or 0x2 (FP16)                              ║
+  ║                                                                          ║
+  ║  CAUTION: CDP D_DATA_FORMAT resets to 0x1 (INT16), while RDMA resets   ║
+  ║  to 0x0 (INT8). Both must be explicitly programmed.                     ║
+  ║                                                                          ║
+  ║  RTL evidence: reg2dp_input_data feeds both RDMA sizing and DP          ║
+  ║  pipeline width independently.                                          ║
+  ╚═══════════════════════════════════════════════════════════════════════════╝
+
+  ╔═══════════════════════════════════════════════════════════════════════════╗
+  ║  C6. Memory Boundary Constraint (Testbench)                              ║
+  ╠═══════════════════════════════════════════════════════════════════════════╣
+  ║  All source and destination data must fit within DRAM bounds.            ║
+  ║                                                                          ║
+  ║  Source: SRC_BASE + num_surfaces × SURFACE_STRIDE ≤ DRAM_SIZE           ║
+  ║  Or more precisely:                                                      ║
+  ║    SRC_BASE + (num_surfaces-1) × SURFACE_STRIDE                         ║
+  ║             + HEIGHT × LINE_STRIDE                                       ║
+  ║             + ceil((WIDTH+1) × bpe / ATOM) × ATOM ≤ DRAM_SIZE          ║
+  ║                                                                          ║
+  ║  Destination: same formula with DST_BASE and DST_LINE/SURFACE_STRIDE   ║
+  ║                                                                          ║
+  ║  For 1KB DRAM: all addresses must be ≤ 0x3FF (1023)                    ║
+  ╚═══════════════════════════════════════════════════════════════════════════╝
+
+  ╔═══════════════════════════════════════════════════════════════════════════╗
+  ║  C7. Source and Destination Non-Overlap                                  ║
+  ╠═══════════════════════════════════════════════════════════════════════════╣
+  ║  Source and destination memory regions SHOULD NOT overlap.               ║
+  ║                                                                          ║
+  ║  Since RDMA reads and WDMA writes can occur concurrently, overlapping   ║
+  ║  regions lead to data corruption (race condition on memory).            ║
+  ╚═══════════════════════════════════════════════════════════════════════════╝
+
+  ╔═══════════════════════════════════════════════════════════════════════════╗
+  ║  C8. Normalization Length vs. Channel Count                              ║
+  ╠═══════════════════════════════════════════════════════════════════════════╣
+  ║  The normalization window extends symmetrically around each channel.    ║
+  ║  Channels outside the cube are zero-padded by the bufferin stage.       ║
+  ║                                                                          ║
+  ║  Window sizes:                                                          ║
+  ║    LEN3: center ± 1 → 3 channels  (good for 1+ channels)              ║
+  ║    LEN5: center ± 2 → 5 channels  (good for 1+ channels)              ║
+  ║    LEN7: center ± 3 → 7 channels  (good for 1+ channels)              ║
+  ║    LEN9: center ± 4 → 9 channels  (good for 1+ channels)              ║
+  ║                                                                          ║
+  ║  No minimum channel requirement — zero-padding handles edges.           ║
+  ║  However, larger windows on few channels produce mostly zero-padded     ║
+  ║  sums, giving weak normalization. Recommended:                          ║
+  ║    channel_count >= normalz_len for meaningful normalization            ║
+  ║                                                                          ║
+  ║  RTL evidence: NV_NVDLA_CDP_DP_bufferin.v implements sliding window    ║
+  ║  with data_shift arrays, prepending/appending zeros for boundary.       ║
+  ╚═══════════════════════════════════════════════════════════════════════════╝
+
+  ╔═══════════════════════════════════════════════════════════════════════════╗
+  ║  C9. Square-Sum Bit Width and Overflow                                   ║
+  ╠═══════════════════════════════════════════════════════════════════════════╣
+  ║  The square-sum stage computes sum of squares across the normalization   ║
+  ║  window. Each element is icvto-bit (9-bit) after input conversion.      ║
+  ║                                                                          ║
+  ║  INT8 square: 9 × 9 = 18 bits per element                              ║
+  ║  Sum of 9 elements: 18 + ceil(log2(9)) = 18 + 4 = 22 bits max         ║
+  ║                                                                          ║
+  ║  RTL sum output: int8_sum is 21 bits per throughput element              ║
+  ║                  (NV_NVDLA_CDP_DP_sum.v)                                ║
+  ║                                                                          ║
+  ║  Input conversion (DATIN_OFFSET, DATIN_SCALE, DATIN_SHIFTER) should    ║
+  ║  be configured so that the icvto output stays within 9-bit signed       ║
+  ║  range [-256, 255] to avoid internal saturation.                        ║
+  ╚═══════════════════════════════════════════════════════════════════════════╝
+
+  ╔═══════════════════════════════════════════════════════════════════════════╗
+  ║  C10. Input Conversion Pipeline                                          ║
+  ╠═══════════════════════════════════════════════════════════════════════════╣
+  ║  Formula: cvt_out = saturate_icvto((input + datin_offset)               ║
+  ║                                     × datin_scale >> datin_shifter)     ║
+  ║                                                                          ║
+  ║  Constraints:                                                            ║
+  ║    - datin_shifter is unsigned 5-bit (0-31)                             ║
+  ║    - Result saturated to icvto bits (9-bit signed: -256 to +255)        ║
+  ║    - datin_scale should not be 0 unless bypass is desired               ║
+  ║    - For identity pass-through: offset=0, scale=1, shifter=0           ║
+  ║                                                                          ║
+  ║  RTL evidence: NV_NVDLA_CDP_DP_cvtin.v 3-stage pipeline:               ║
+  ║    Stage 1: add offset                                                   ║
+  ║    Stage 2: multiply by scale                                            ║
+  ║    Stage 3: shift right and saturate to icvto width                     ║
+  ╚═══════════════════════════════════════════════════════════════════════════╝
+
+  ╔═══════════════════════════════════════════════════════════════════════════╗
+  ║  C11. Output Conversion Pipeline                                         ║
+  ╠═══════════════════════════════════════════════════════════════════════════╣
+  ║  Formula: output = saturate((mul_result + datout_offset)                ║
+  ║                              × datout_scale >> datout_shifter)          ║
+  ║                                                                          ║
+  ║  Constraints:                                                            ║
+  ║    - datout_shifter is unsigned 6-bit (0-63)                            ║
+  ║    - datout_offset width depends on data type:                          ║
+  ║        INT8: 25 bits      INT16: 32 bits      FP16: 16 bits            ║
+  ║    - Output saturated to input data type width                          ║
+  ║        INT8: [-128, 127]  INT16: [-32768, 32767]  FP16: IEEE 754      ║
+  ║    - For identity: offset=0, scale=1, shifter=0                         ║
+  ╚═══════════════════════════════════════════════════════════════════════════╝
+
+  ╔═══════════════════════════════════════════════════════════════════════════╗
+  ║  C12. LUT Table Coverage                                                 ║
+  ╠═══════════════════════════════════════════════════════════════════════════╣
+  ║  LE table: 65 entries                                                    ║
+  ║    - EXPONENT mode: covers range [start+2^offset, start+2^(offset+64)] ║
+  ║    - LINEAR mode:   covers range [start, end] uniformly in 64 segments ║
+  ║                                                                          ║
+  ║  LO table: 257 entries                                                   ║
+  ║    - Always LINEAR: covers range [start, end] in 256 segments           ║
+  ║                                                                          ║
+  ║  Constraints:                                                            ║
+  ║    - LE_END > LE_START (when using LE table)                            ║
+  ║    - LO_END > LO_START (when using LO table)                           ║
+  ║    - Coverage should span the expected square-sum output range          ║
+  ║    - Uncovered inputs use slope extrapolation (UFLOW/OFLOW)            ║
+  ║    - Priority registers resolve when input is covered by both tables   ║
+  ║                                                                          ║
+  ║  Precision of start/end:                                                ║
+  ║    INT8: 22 bits (32+6 available, 22 used)                              ║
+  ║    INT16: 38 bits                                                        ║
+  ║    FP16: 32 bits                                                         ║
+  ╚═══════════════════════════════════════════════════════════════════════════╝
+
+  ╔═══════════════════════════════════════════════════════════════════════════╗
+  ║  C13. LUT Programming Sequence                                           ║
+  ╠═══════════════════════════════════════════════════════════════════════════╣
+  ║  LUT tables MUST be programmed BEFORE enabling the operation:            ║
+  ║                                                                          ║
+  ║  1. Set S_LUT_ACCESS_CFG (table=LE, type=WRITE, addr=0)                ║
+  ║  2. Write 65 entries to S_LUT_ACCESS_DATA (addr auto-increments)        ║
+  ║  3. Set S_LUT_ACCESS_CFG (table=LO, type=WRITE, addr=0)                ║
+  ║  4. Write 257 entries to S_LUT_ACCESS_DATA (addr auto-increments)       ║
+  ║  5. Configure S_LUT_CFG, S_LUT_INFO, start/end, slope registers        ║
+  ║  6. Configure all D_* registers                                          ║
+  ║  7. Enable RDMA, then CDP                                               ║
+  ║                                                                          ║
+  ║  NOTE: S_LUT_* registers are NOT dual-grouped. They are shared.         ║
+  ║  Changing LUT while another operation is running may corrupt results.   ║
+  ╚═══════════════════════════════════════════════════════════════════════════╝
+
+  ╔═══════════════════════════════════════════════════════════════════════════╗
+  ║  C14. Enable Sequence                                                    ║
+  ╠═══════════════════════════════════════════════════════════════════════════╣
+  ║  CDP_RDMA D_OP_ENABLE MUST be set BEFORE CDP D_OP_ENABLE.               ║
+  ║                                                                          ║
+  ║  Sequence:                                                               ║
+  ║    1. Configure all CDP_RDMA D_* registers                               ║
+  ║    2. Configure all CDP D_* registers                                    ║
+  ║    3. write_reg(CDP_RDMA_D_OP_ENABLE, 0x1)                             ║
+  ║    4. write_reg(CDP_D_OP_ENABLE, 0x1)                                   ║
+  ║                                                                          ║
+  ║  If CDP is enabled before RDMA, the datapath stalls waiting for data.   ║
+  ║  If RDMA is enabled without CDP, data backs up in the context queue.    ║
+  ║                                                                          ║
+  ║  RTL evidence: cdp.v connects RDMA → context_queue → DP. The DP must   ║
+  ║  be ready to consume when RDMA starts producing.                        ║
+  ╚═══════════════════════════════════════════════════════════════════════════╝
+
+  ╔═══════════════════════════════════════════════════════════════════════════╗
+  ║  C15. Register Group (Ping-Pong) Protocol                                ║
+  ╠═══════════════════════════════════════════════════════════════════════════╣
+  ║  Both CDP_RDMA and CDP use dual register groups for pipelining.         ║
+  ║                                                                          ║
+  ║  Rules:                                                                  ║
+  ║    1. Check S_STATUS — target group must be IDLE                        ║
+  ║    2. Set S_POINTER PRODUCER to select the group                        ║
+  ║    3. Write all D_* registers for that group                            ║
+  ║    4. Set D_OP_ENABLE to start                                          ║
+  ║    5. Group transitions: IDLE → PENDING → RUNNING → IDLE               ║
+  ║                                                                          ║
+  ║  Both CDP_RDMA and CDP PRODUCER/CONSUMER must select the same group.   ║
+  ╚═══════════════════════════════════════════════════════════════════════════╝
+
+  ╔═══════════════════════════════════════════════════════════════════════════╗
+  ║  C16. WDMA Output Dimensions Match Input                                 ║
+  ╠═══════════════════════════════════════════════════════════════════════════╣
+  ║  CDP output dimensions are identical to input dimensions.                ║
+  ║  (LRN does not change spatial or channel dimensions.)                    ║
+  ║                                                                          ║
+  ║  Therefore:                                                              ║
+  ║    DST memory region = same width × height × channel as source          ║
+  ║    DST_LINE_STRIDE ≥ SRC_LINE_STRIDE (same minimum constraint)         ║
+  ║    DST_SURFACE_STRIDE ≥ DST_LINE_STRIDE × (height + 1)                ║
+  ║                                                                          ║
+  ║  RTL evidence: WDMA uses width/height/channel from RDMA via context     ║
+  ║  queue. No dimension register in CDP core.                              ║
+  ╚═══════════════════════════════════════════════════════════════════════════╝
+
+  ╔═══════════════════════════════════════════════════════════════════════════╗
+  ║  C17. Bypass Mode Constraints                                            ║
+  ╠═══════════════════════════════════════════════════════════════════════════╣
+  ║  D_FUNC_BYPASS register allows bypassing pipeline stages:               ║
+  ║                                                                          ║
+  ║  SQSUM_BYPASS (bit 0):                                                   ║
+  ║    When enabled, converted input goes directly to LUT without           ║
+  ║    computing the square sum. Useful for testing LUT in isolation.       ║
+  ║                                                                          ║
+  ║  MUL_BYPASS (bit 1):                                                     ║
+  ║    When enabled, LUT output is passed directly to output conversion     ║
+  ║    without multiplying by the original input. Useful for pure           ║
+  ║    activation function mode (non-LRN usage).                            ║
+  ║                                                                          ║
+  ║  Both bypass = 0: Normal LRN = input × LUT(sqsum(input))               ║
+  ║  SQSUM bypass:     LRN = input × LUT(cvt(input))                       ║
+  ║  Both bypass:      output = cvtout(LUT(cvtin(input)))                   ║
+  ╚═══════════════════════════════════════════════════════════════════════════╝
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  SECTION 5: PRACTICAL TEST SPACE (for nv_small + 1KB DRAM)
+═══════════════════════════════════════════════════════════════════════════════
+
+  Given DRAM_SIZE = 1024 bytes, the practical limits are:
+
+  ┌─────────────────────────────┬───────────────────────────────────────────┐
+  │ Parameter                    │ Practical Range                           │
+  ├─────────────────────────────┼───────────────────────────────────────────┤
+  │ WIDTH (reg value)            │ 0 to ~63 (1-64 elements, INT8)          │
+  │ HEIGHT (reg value)           │ 0 to ~15 (1-16 for small cubes)         │
+  │ CHANNEL (reg value)          │ 0 to ~63 (1-64 channels, INT8)          │
+  │ SRC_BASE_ADDR_LOW            │ 0x000 to 0x200 (aligned to 8)          │
+  │ DST_BASE_ADDR_LOW            │ 0x200 to 0x3F8 (non-overlapping)       │
+  │ LINE_STRIDE                  │ 8 to 128 (aligned to 8)                │
+  │ SURFACE_STRIDE               │ line_stride × height to 512 (align 8)  │
+  │ NORMALZ_LEN                  │ 0, 1, 2, 3 (LEN3 through LEN9)        │
+  │ INPUT_DATA                   │ 0 (INT8) primary, 1 (INT16) secondary  │
+  └─────────────────────────────┴───────────────────────────────────────────┘
+
+  Recommended small test configurations:
+    width=7, height=7, channel=7, INT8  → 8×8×8 = 512B (fits 1KB with I/O)
+    width=3, height=3, channel=7, INT8  → 4×4×8 = 128B
+    width=3, height=3, channel=15, INT8 → 4×4×16 = 256B (2 surfaces)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  SECTION 6: VALID CONFIGURATION EXAMPLES
+═══════════════════════════════════════════════════════════════════════════════
+
+  ┌ EXAMPLE 1: Minimal INT8 LRN (8×8 cube, 8 channels, LEN3) ─────────────┐
+  │                                                                          │
+  │  Data: width=7, height=7, channel=7, INT8                               │
+  │  Memory: 8×8×1surface = 64B source, 64B destination                     │
+  │                                                                          │
+  │  CDP_RDMA:                                                               │
+  │    D_DATA_CUBE_WIDTH   = 7        (8 elements)                          │
+  │    D_DATA_CUBE_HEIGHT  = 7        (8 lines)                             │
+  │    D_DATA_CUBE_CHANNEL = 7        (8 channels = 1 surface @ INT8)       │
+  │    D_SRC_BASE_ADDR_LOW = 0x000    (source at DRAM start)                │
+  │    D_SRC_LINE_STRIDE   = 0x008    (8 bytes per line)                    │
+  │    D_SRC_SURFACE_STRIDE= 0x040    (64 bytes per surface)                │
+  │    D_SRC_DMA_CFG       = 0x1      (MC)                                  │
+  │    D_DATA_FORMAT        = 0x0     (INT8)                                │
+  │                                                                          │
+  │  CDP:                                                                    │
+  │    D_FUNC_BYPASS       = 0x0      (no bypass)                           │
+  │    D_DST_BASE_ADDR_LOW = 0x100    (destination at 256)                  │
+  │    D_DST_LINE_STRIDE   = 0x008    (8 bytes per line)                    │
+  │    D_DST_SURFACE_STRIDE= 0x040    (64 bytes per surface)                │
+  │    D_DST_DMA_CFG       = 0x1      (MC)                                  │
+  │    D_DATA_FORMAT        = 0x0     (INT8)                                │
+  │    D_LRN_CFG           = 0x0      (LEN3)                                │
+  │    D_DATIN_OFFSET      = 0x0000   D_DATIN_SCALE   = 0x0001              │
+  │    D_DATIN_SHIFTER     = 0x00     D_DATOUT_OFFSET = 0x00000000          │
+  │    D_DATOUT_SCALE      = 0x0001   D_DATOUT_SHIFTER = 0x00               │
+  │    D_NAN_FLUSH_TO_ZERO = 0x0                                            │
+  │                                                                          │
+  │  Total DRAM usage: 64 + 64 = 128 bytes (fits in 1KB)                   │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+  ┌ EXAMPLE 2: Multi-Surface INT8 (4×4×16 channels, LEN5) ────────────────┐
+  │                                                                          │
+  │  Data: width=3, height=3, channel=15, INT8                              │
+  │  Surfaces: ceil(16/8) = 2 surfaces                                      │
+  │  Memory per surface: ceil(4/8)*8 × 4 = 8 × 4 = 32B                    │
+  │  Total source: 2 × 32 = 64B                                            │
+  │                                                                          │
+  │  CDP_RDMA:                                                               │
+  │    D_DATA_CUBE_WIDTH   = 3        (4 elements)                          │
+  │    D_DATA_CUBE_HEIGHT  = 3        (4 lines)                             │
+  │    D_DATA_CUBE_CHANNEL = 15       (16 channels = 2 surfaces @ INT8)     │
+  │    D_SRC_BASE_ADDR_LOW = 0x000                                          │
+  │    D_SRC_LINE_STRIDE   = 0x008    (8 bytes, ATOM-aligned)               │
+  │    D_SRC_SURFACE_STRIDE= 0x020    (32 bytes = 8 × 4)                   │
+  │    D_DATA_FORMAT        = 0x0     (INT8)                                │
+  │                                                                          │
+  │  CDP:                                                                    │
+  │    D_DST_BASE_ADDR_LOW = 0x080    (destination at 128)                  │
+  │    D_DST_LINE_STRIDE   = 0x008                                          │
+  │    D_DST_SURFACE_STRIDE= 0x020                                          │
+  │    D_LRN_CFG           = 0x1      (LEN5)                                │
+  │                                                                          │
+  │  Total DRAM usage: 64 + 64 = 128 bytes                                 │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+  ┌ EXAMPLE 3: Bypass Mode Testing (LUT pass-through) ────────────────────┐
+  │                                                                          │
+  │  Same as Example 1 but with SQSUM and MUL bypassed:                     │
+  │    D_FUNC_BYPASS = 0x3  (both bits set)                                 │
+  │                                                                          │
+  │  Data flow: input → cvtin → LUT(cvtin) → cvtout → output               │
+  │  Useful for verifying LUT correctness in isolation without              │
+  │  square-sum and multiplication.                                          │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  SECTION 7: INVALID CONFIGURATION EXAMPLES
+═══════════════════════════════════════════════════════════════════════════════
+
+  ✗ INVALID: Misaligned base address
+    D_SRC_BASE_ADDR_LOW = 0x003  → Not 8-byte aligned (violates C1)
+
+  ✗ INVALID: Misaligned line stride
+    D_SRC_LINE_STRIDE = 0x005    → Not 8-byte aligned (violates C2)
+
+  ✗ INVALID: Surface stride too small
+    width=7, height=7, line_stride=8
+    D_SRC_SURFACE_STRIDE = 0x020  → 32 < 8×8=64 (violates C3)
+
+  ✗ INVALID: Data format mismatch
+    CDP_RDMA D_DATA_FORMAT = 0x0 (INT8)
+    CDP      D_DATA_FORMAT = 0x1 (INT16)  → Mismatch (violates C5)
+
+  ✗ INVALID: Data exceeds DRAM
+    width=127, height=127, channel=7, line_stride=128
+    SRC_BASE=0x000: 128×128=16384B > 1024B DRAM (violates C6)
+
+  ✗ INVALID: CDP enabled before RDMA
+    write_reg(CDP_D_OP_ENABLE, 0x1);       // WRONG ORDER
+    write_reg(CDP_RDMA_D_OP_ENABLE, 0x1);  // (violates C14)
+
+  ✗ INVALID: Overlapping source/destination
+    SRC_BASE=0x000, DST_BASE=0x020, data_size=64B
+    Source [0x000, 0x03F] overlaps with Dest [0x020, 0x05F] (violates C7)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  SECTION 8: DATA TYPE SPECIFIC CONSTRAINTS
+═══════════════════════════════════════════════════════════════════════════════
+
+  ┌─────────────────────────────┬────────────┬────────────┬──────────────┐
+  │ Property                     │ INT8       │ INT16      │ FP16         │
+  ├─────────────────────────────┼────────────┼────────────┼──────────────┤
+  │ Bytes per element            │ 1          │ 2          │ 2            │
+  │ Channels per atom            │ 8          │ 4          │ 4            │
+  │ icvto width (internal)       │ 9 bits     │ 17 bits    │ FP17        │
+  │ DATIN_OFFSET width           │ 8 bits     │ 16 bits    │ 16 bits     │
+  │ DATOUT_OFFSET width          │ 25 bits    │ 32 bits    │ 16 bits     │
+  │ DATIN_SHIFTER range          │ 5b (0-31)  │ 5b (0-31)  │ N/A (FP)   │
+  │ DATOUT_SHIFTER range         │ 6b (0-63)  │ 6b (0-63)  │ N/A (FP)   │
+  │ Output saturation range      │ [-128,127] │ [-32K,32K] │ IEEE FP16  │
+  │ NaN handling                 │ N/A        │ N/A        │ Flush avail │
+  │ LUT LE_INDEX_SELECT width    │ 6 bits     │ 7 bits     │ 8 bits     │
+  │ LUT LO_INDEX_SELECT width    │ 6 bits     │ 7 bits     │ 8 bits     │
+  │ LUT start/end precision      │ 22 bits    │ 38 bits    │ 32 bits    │
+  │ Min LINE_STRIDE (W=8)        │ 8 bytes    │ 16 bytes   │ 16 bytes   │
+  └─────────────────────────────┴────────────┴────────────┴──────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  SECTION 9: CONSTRAINT VALIDATION FORMULAS
+═══════════════════════════════════════════════════════════════════════════════
+
+  Let:
+    W = width register value (actual width = W+1)
+    H = height register value (actual height = H+1)
+    C = channel register value (actual channels = C+1)
+    bpe = bytes per element (1 for INT8, 2 for INT16/FP16)
+    am = atomic_m = ATOM_SIZE / bpe (8 for INT8, 4 for INT16/FP16)
+    LS = SRC_LINE_STRIDE
+    SS = SRC_SURFACE_STRIDE
+    LSD = DST_LINE_STRIDE
+    SSD = DST_SURFACE_STRIDE
+    SRC = SRC_BASE_ADDR_LOW
+    DST = DST_BASE_ADDR_LOW
+    NS = ceil((C+1) / am)  → number of surfaces
+
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │ F1. Alignment:                                                          │
+  │     SRC % 8 == 0                                                        │
+  │     DST % 8 == 0                                                        │
+  │     LS % 8 == 0                                                         │
+  │     SS % 8 == 0                                                         │
+  │     LSD % 8 == 0                                                        │
+  │     SSD % 8 == 0                                                        │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │ F2. Minimum line stride:                                                │
+  │     LS >= ceil((W+1) × bpe / 8) × 8                                    │
+  │     LSD >= ceil((W+1) × bpe / 8) × 8                                   │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │ F3. Minimum surface stride:                                             │
+  │     SS >= LS × (H+1)                                                    │
+  │     SSD >= LSD × (H+1)                                                  │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │ F4. DRAM bounds:                                                        │
+  │     SRC + (NS-1) × SS + H × LS + ceil((W+1)×bpe/8)×8 <= DRAM_SIZE    │
+  │     DST + (NS-1) × SSD + H × LSD + ceil((W+1)×bpe/8)×8 <= DRAM_SIZE  │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │ F5. Non-overlap:                                                        │
+  │     src_end = SRC + (NS-1) × SS + H × LS + ceil((W+1)×bpe/8)×8       │
+  │     dst_end = DST + (NS-1) × SSD + H × LSD + ceil((W+1)×bpe/8)×8     │
+  │     SRC >= dst_end  OR  DST >= src_end                                  │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │ F6. Data format consistency:                                            │
+  │     CDP_RDMA.D_DATA_FORMAT == CDP.D_DATA_FORMAT                        │
+  ├──────────────────────────────────────────────────────────────────────────┤
+  │ F7. LUT range:                                                          │
+  │     LUT_LE_END > LUT_LE_START  (38-bit signed comparison)              │
+  │     LUT_LO_END > LUT_LO_START  (38-bit signed comparison)             │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+  SECTION 10: VERIFICATION CHECKLIST
+═══════════════════════════════════════════════════════════════════════════════
+
+  Pre-Configuration:
+  □ Both CDP_RDMA and CDP S_STATUS show IDLE for target group
+  □ S_POINTER PRODUCER set to same group in both CDP_RDMA and CDP
+
+  Data Geometry:
+  □ Width, Height, Channel values are valid (0-8191)
+  □ Channel count matches expected number of surfaces
+  □ Data format set identically in RDMA and CDP core
+
+  Memory Layout:
+  □ SRC_BASE_ADDR aligned to 8 bytes
+  □ DST_BASE_ADDR aligned to 8 bytes
+  □ LINE_STRIDE aligned to 8 bytes, ≥ minimum
+  □ SURFACE_STRIDE aligned to 8 bytes, ≥ LINE_STRIDE × (HEIGHT+1)
+  □ Source data fits within DRAM bounds
+  □ Destination data fits within DRAM bounds
+  □ Source and destination regions do not overlap
+
+  LUT Setup:
+  □ LE table fully loaded (65 entries)
+  □ LO table fully loaded (257 entries)
+  □ LUT_CFG function and priority configured
+  □ LUT START/END ranges cover expected input range
+  □ Slope scale/shift configured for out-of-range behavior
+
+  Data Conversion:
+  □ DATIN_OFFSET / SCALE / SHIFTER set (identity: 0 / 1 / 0)
+  □ DATOUT_OFFSET / SCALE / SHIFTER set (identity: 0 / 1 / 0)
+  □ Conversion won't cause excessive saturation
+
+  LRN Configuration:
+  □ NORMALZ_LEN set to desired window size
+  □ D_FUNC_BYPASS set (0x0 for normal LRN)
+  □ D_NAN_FLUSH_TO_ZERO set if FP16 mode
+
+  Enable Sequence:
+  □ All configuration registers written
+  □ CDP_RDMA D_OP_ENABLE set FIRST
+  □ CDP D_OP_ENABLE set SECOND
+
+  Post-Operation:
+  □ Poll S_STATUS until IDLE
+  □ Check D_NAN_INPUT_NUM / D_INF_INPUT_NUM for unexpected values
+  □ Check D_OUT_SATURATION for excessive saturation
+  □ If PERF_ENABLE was set: read stall and LUT hit/miss counters
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                              END OF DOCUMENT
+═══════════════════════════════════════════════════════════════════════════════

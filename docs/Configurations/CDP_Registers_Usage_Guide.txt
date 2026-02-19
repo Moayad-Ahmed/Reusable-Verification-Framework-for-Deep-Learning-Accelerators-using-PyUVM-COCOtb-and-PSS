@@ -1,0 +1,956 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║          NVDLA CDP & CDP_RDMA REGISTERS - PRACTICAL USAGE GUIDE              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+This document provides concise usage instructions for all CDP and CDP_RDMA
+registers, including bit fields, values, and practical examples.
+
+The CDP (Channel Data Processor) performs local response normalization (LRN)
+using a look-up table (LUT) based approach. The pipeline is:
+  RDMA → Input Conversion → Square-Sum → LUT Interpolation → Multiply → Output Conversion → WDMA
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                       CDP_RDMA MODULE (Base: 0xC000)
+═══════════════════════════════════════════════════════════════════════════════
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 1. S_STATUS (0xC000)                                             [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Status of both register groups (Group 0 and Group 1)               │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [1:0]   STATUS_0  - Group 0 status                                        │
+│   [17:16] STATUS_1  - Group 1 status                                        │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = IDLE     - Ready for new configuration                              │
+│   0x1 = RUNNING  - Currently executing read DMA operation                   │
+│   0x2 = PENDING  - Configured and waiting to execute                        │
+│                                                                              │
+│ USAGE:                                                                       │
+│   status = read_reg(CDP_RDMA_S_STATUS);                                     │
+│   group0_status = status & 0x3;                                             │
+│   group1_status = (status >> 16) & 0x3;                                     │
+│   if (group0_status == 0x0) { /* safe to configure group 0 */ }            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 2. S_POINTER (0xC004)                                            [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Selects which register group (0 or 1) software writes to           │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0]  PRODUCER - Which group SW configures (RW)                            │
+│   [16] CONSUMER - Which group HW is using (RO)                              │
+│                                                                              │
+│ VALUES:                                                                      │
+│   PRODUCER: 0 = Configure Group 0,  1 = Configure Group 1                  │
+│   CONSUMER: 0 = HW using Group 0,   1 = HW using Group 1                   │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDP_RDMA_S_POINTER, 0x0);  // Select Group 0                    │
+│   write_reg(CDP_RDMA_S_POINTER, 0x1);  // Select Group 1                    │
+│   // Always set before configuring D_* registers                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 3. D_OP_ENABLE (0xC008)                                          [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Trigger to start RDMA read operation                               │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] OP_EN - Operation enable                                              │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = DISABLE - No operation                                              │
+│   0x1 = ENABLE  - Start DMA read (auto-clears after operation)              │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // Configure all other RDMA registers first, then:                        │
+│   write_reg(CDP_RDMA_D_OP_ENABLE, 0x1);  // Start RDMA                     │
+│   // MUST be enabled BEFORE CDP D_OP_ENABLE                                │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 4. D_DATA_CUBE_WIDTH (0xC00C)                                    [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Width of input data cube                                           │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [12:0] WIDTH                                                              │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0 to 8191 (represents 1 to 8192 elements)                                │
+│   Actual width = register_value + 1                                         │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DATA_CUBE_WIDTH, 7);    // 8 elements wide                   │
+│   write_reg(D_DATA_CUBE_WIDTH, 0);    // 1 element wide                    │
+│   write_reg(D_DATA_CUBE_WIDTH, 8191); // 8192 elements wide (max)          │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 5. D_DATA_CUBE_HEIGHT (0xC010)                                   [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Height of input data cube                                          │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [12:0] HEIGHT                                                             │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0 to 8191 (represents 1 to 8192 elements)                                │
+│   Actual height = register_value + 1                                        │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DATA_CUBE_HEIGHT, 7);   // 8 elements tall                   │
+│   write_reg(D_DATA_CUBE_HEIGHT, 223); // 224 elements tall                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 6. D_DATA_CUBE_CHANNEL (0xC014)                                  [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Number of channels in input data cube                              │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [12:0] CHANNEL                                                            │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0 to 8191 (represents 1 to 8192 channels)                                │
+│   Actual channels = register_value + 1                                      │
+│                                                                              │
+│ NOTES:                                                                       │
+│   The RDMA fetches data in blocks of ATOM_SIZE (8 bytes for nv_small).      │
+│   Channels are grouped by atomic_m = 8 elements (INT8).                     │
+│   Channel count determines the number of surface iterations.                │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DATA_CUBE_CHANNEL, 7);   // 8 channels                       │
+│   write_reg(D_DATA_CUBE_CHANNEL, 63);  // 64 channels                      │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 7. D_SRC_BASE_ADDR_LOW (0xC018)                                 [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Lower 32 bits of source data cube base address                     │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] SRC_BASE_ADDR_LOW                                                  │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_SRC_BASE_ADDR_LOW, 0x00000000);  // Start of DRAM            │
+│   // Must be aligned to ATOM (8 bytes)                                      │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 8. D_SRC_BASE_ADDR_HIGH (0xC01C)                                [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Upper 32 bits of source data cube base address                     │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] SRC_BASE_ADDR_HIGH                                                 │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_SRC_BASE_ADDR_HIGH, 0x00000000); // For 32-bit addresses     │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 9. D_SRC_LINE_STRIDE (0xC020)                                    [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Stride in bytes between consecutive lines within a surface         │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] SRC_LINE_STRIDE                                                    │
+│                                                                              │
+│ NOTES:                                                                       │
+│   actual stride value = LINE_STRIDE (no +1 encoding)                        │
+│   Must be ≥ width × bytes_per_element for the surface chunk                 │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // For 8-wide, INT8, ATOM-aligned: stride = ceil(8*1/8)*8 = 8            │
+│   write_reg(D_SRC_LINE_STRIDE, 0x00000008);                                │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 10. D_SRC_SURFACE_STRIDE (0xC024)                                [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Stride in bytes between consecutive surfaces (channel groups)      │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] SRC_SURFACE_STRIDE                                                 │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // surface_stride = line_stride × height                                  │
+│   write_reg(D_SRC_SURFACE_STRIDE, 0x00000040);  // 8 × 8 = 64             │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 11. D_SRC_DMA_CFG (0xC028)                                      [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Select memory type for source data                                 │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] SRC_RAM_TYPE                                                          │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = CV   - On-chip SRAM (CVSRAM)                                       │
+│   0x1 = MC   - External memory controller (DRAM)                            │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_SRC_DMA_CFG, 0x1);  // Read from external memory             │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 12. D_SRC_COMPRESSION_EN (0xC02C)                                [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Whether source data is compressed (always disabled in v1.0)        │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] SRC_COMPRESSION_EN                                                    │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = DISABLE - No compression (always this value in NVDLA v1.0)         │
+│   0x1 = ENABLE  - Compression enabled (not available in v1.0)               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 13. D_OPERATION_MODE (0xC030)                                    [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Operation mode (always disabled in v1.0)                           │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [1:0] OPERATION_MODE                                                      │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = READPHILE  - Read-philic mode                                       │
+│   0x1 = WRITEPHILE - Write-philic mode                                      │
+│   0x2 = ORDINARY   - Ordinary mode                                          │
+│                                                                              │
+│ NOTES: This register is READ-ONLY in NVDLA v1.0. Always reads 0.           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 14. D_DATA_FORMAT (0xC034)                                       [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Input data precision format                                        │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [1:0] INPUT_DATA                                                          │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = INT8  - 8-bit signed integer                                        │
+│   0x1 = INT16 - 16-bit signed integer                                       │
+│   0x2 = FP16  - 16-bit floating point (half precision)                      │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DATA_FORMAT, 0x0);  // INT8 mode                             │
+│   write_reg(D_DATA_FORMAT, 0x1);  // INT16 mode                            │
+│   write_reg(D_DATA_FORMAT, 0x2);  // FP16 mode                             │
+│   // Must match CDP D_DATA_FORMAT                                           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 15. D_PERF_ENABLE (0xC038)                                       [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Enable DMA performance counter                                     │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] DMA_EN                                                                │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = DISABLE - Performance counter off                                   │
+│   0x1 = ENABLE  - Count read stall cycles                                   │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_PERF_ENABLE, 0x1);  // Enable perf counting                  │
+│   // After operation, read D_PERF_READ_STALL for stall count               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 16. D_PERF_READ_STALL (0xC03C)                                   [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Number of stall cycles during read DMA                             │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] PERF_READ_STALL                                                    │
+│                                                                              │
+│ USAGE:                                                                       │
+│   stall_count = read_reg(D_PERF_READ_STALL);                               │
+│   // Valid only after operation completes and D_PERF_ENABLE was set         │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 17. D_CYA (0xC040)                                               [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Cover-Your-Ass debug/vendor register                               │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] CYA                                                                │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_CYA, 0x0);  // Typically left at 0                           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                        CDP MODULE (Base: 0xD000)
+     Functional Logic, LUT Processing, and Write DMA for Channel Data Processor
+═══════════════════════════════════════════════════════════════════════════════
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 1. S_STATUS (0xD000)                                             [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Status of both register groups (Group 0 and Group 1)               │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [1:0]   STATUS_0  - Group 0 status                                        │
+│   [17:16] STATUS_1  - Group 1 status                                        │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = IDLE     - Ready for new configuration                              │
+│   0x1 = RUNNING  - Currently executing CDP operation                        │
+│   0x2 = PENDING  - Configured and waiting to execute                        │
+│                                                                              │
+│ USAGE:                                                                       │
+│   status = read_reg(CDP_S_STATUS);                                          │
+│   group0_status = status & 0x3;                                             │
+│   if (group0_status == 0x0) { /* safe to configure group 0 */ }            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 2. S_POINTER (0xD004)                                            [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Selects which register group (0 or 1) software writes to           │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0]  PRODUCER - Which group SW configures (RW)                            │
+│   [16] CONSUMER - Which group HW is using (RO)                              │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(CDP_S_POINTER, 0x0);  // Select Group 0                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+────────────────────────────────────────────────────────────────────────────────
+                     LUT REGISTERS (S_ prefix, not dual-grouped)
+────────────────────────────────────────────────────────────────────────────────
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 3. S_LUT_ACCESS_CFG (0xD008)                                     [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Configure LUT access for reading or writing LUT entries            │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [9:0]  LUT_ADDR        - Start address for LUT access (0-1023)           │
+│   [16]   LUT_TABLE_ID    - Which LUT table                                  │
+│   [17]   LUT_ACCESS_TYPE - Read or Write                                    │
+│                                                                              │
+│ LUT_TABLE_ID VALUES:                                                        │
+│   0x0 = LE - Linear/Exponential table (65 entries, for fine mapping)        │
+│   0x1 = LO - Linear-Only table (257 entries, for coarse mapping)            │
+│                                                                              │
+│ LUT_ACCESS_TYPE VALUES:                                                     │
+│   0x0 = READ  - Read LUT entry                                             │
+│   0x1 = WRITE - Write LUT entry                                            │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // Write to LE table starting at address 0:                               │
+│   write_reg(S_LUT_ACCESS_CFG, 0x20000);  // table=LE, type=WRITE, addr=0   │
+│   // Write data using S_LUT_ACCESS_DATA (address auto-increments)           │
+│   write_reg(S_LUT_ACCESS_DATA, value0);                                     │
+│   write_reg(S_LUT_ACCESS_DATA, value1);                                     │
+│   ...                                                                        │
+│   // Write to LO table:                                                     │
+│   write_reg(S_LUT_ACCESS_CFG, 0x30000);  // table=LO, type=WRITE, addr=0   │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 4. S_LUT_ACCESS_DATA (0xD00C)                                    [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: LUT data for read or write                                         │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [15:0] LUT_DATA - Signed 16-bit value                                    │
+│                                                                              │
+│ NOTES:                                                                       │
+│   When ACCESS_TYPE=WRITE: this is data written to LUT                       │
+│   When ACCESS_TYPE=READ:  this is data read from LUT                        │
+│   Address auto-increments after each access                                 │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(S_LUT_ACCESS_DATA, 0x1234);  // Write entry                    │
+│   data = read_reg(S_LUT_ACCESS_DATA);    // Read entry                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 5. S_LUT_CFG (0xD010)                                            [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: LUT function type and priority configuration                       │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] LUT_LE_FUNCTION     - LE LUT function type                            │
+│   [4] LUT_UFLOW_PRIORITY  - Table selection when both underflow             │
+│   [5] LUT_OFLOW_PRIORITY  - Table selection when both overflow              │
+│   [6] LUT_HYBRID_PRIORITY - Table selection when hit/miss on both           │
+│                                                                              │
+│ LUT_LE_FUNCTION VALUES:                                                     │
+│   0x0 = EXPONENT - LE table uses exponential mapping (power-of-2 spacing)  │
+│   0x1 = LINEAR   - LE table uses linear mapping (uniform spacing)          │
+│                                                                              │
+│ PRIORITY VALUES (for UFLOW/OFLOW/HYBRID):                                  │
+│   0x0 = LE - Use LE table output                                           │
+│   0x1 = LO - Use LO table output                                           │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // LE=exponential, all priorities to LE table:                            │
+│   write_reg(S_LUT_CFG, 0x00);                                              │
+│   // LE=linear, overflow priority to LO:                                    │
+│   write_reg(S_LUT_CFG, 0x21);                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 6. S_LUT_INFO (0xD014)                                           [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: LUT index parameters for mapping input values to table indices     │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [7:0]   LUT_LE_INDEX_OFFSET  - Signed, for LE exponential mode           │
+│   [15:8]  LUT_LE_INDEX_SELECT  - Signed, for LE linear mode                │
+│   [23:16] LUT_LO_INDEX_SELECT  - Signed, for LO table                      │
+│                                                                              │
+│ NOTES:                                                                       │
+│   LE_INDEX_OFFSET: used when LE function = EXPONENT (8 bits, all types)    │
+│   LE_INDEX_SELECT: used when LE function = LINEAR                           │
+│     6 bits for INT8, 7 bits for INT16, 8 bits for FP16                     │
+│   LO_INDEX_SELECT: always linear                                            │
+│     6 bits for INT8, 7 bits for INT16, 8 bits for FP16                     │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(S_LUT_INFO, 0x000000);  // All offsets/selects = 0             │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 7-8. S_LUT_LE_START_LOW/HIGH (0xD018, 0xD01C)                   [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Start value of LE LUT coverage range [le_min, le_max]              │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   LOW:  [31:0] LUT_LE_START_LOW  - Lower 32 bits (signed)                  │
+│   HIGH: [5:0]  LUT_LE_START_HIGH - Upper 6 bits (signed)                   │
+│                                                                              │
+│ NOTES:                                                                       │
+│   When LE=LINEAR: start = le_min                                            │
+│   When LE=EXPONENT, INDEX_OFFSET≥0: start + 2^INDEX_OFFSET = le_min       │
+│   When LE=EXPONENT, INDEX_OFFSET<0:  start = le_min                        │
+│   Precision: 22 bits for INT8, 38 bits for INT16, 32 bits for FP16         │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(S_LUT_LE_START_LOW, 0x00000000);                               │
+│   write_reg(S_LUT_LE_START_HIGH, 0x00);                                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 9-10. S_LUT_LE_END_LOW/HIGH (0xD020, 0xD024)                    [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: End value of LE LUT coverage range (le_max)                        │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   LOW:  [31:0] LUT_LE_END_LOW  - Lower 32 bits                             │
+│   HIGH: [5:0]  LUT_LE_END_HIGH - Upper 6 bits                              │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(S_LUT_LE_END_LOW, 0x0000FFFF);                                 │
+│   write_reg(S_LUT_LE_END_HIGH, 0x00);                                      │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 11-14. S_LUT_LO_START/END_LOW/HIGH (0xD028-0xD034)              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: LO LUT coverage range [lo_min, lo_max]                             │
+│                                                                              │
+│ BIT LAYOUT: Same as LE START/END registers                                  │
+│   START_LOW [31:0], START_HIGH [5:0] → lo_min                              │
+│   END_LOW [31:0], END_HIGH [5:0]     → lo_max                              │
+│                                                                              │
+│ NOTES:                                                                       │
+│   22 bits for INT8, 38 bits for INT16, 32 bits for FP16                    │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(S_LUT_LO_START_LOW, 0x00000000);                               │
+│   write_reg(S_LUT_LO_START_HIGH, 0x00);                                    │
+│   write_reg(S_LUT_LO_END_LOW, 0x0000FFFF);                                 │
+│   write_reg(S_LUT_LO_END_HIGH, 0x00);                                      │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 15. S_LUT_LE_SLOPE_SCALE (0xD038)                                [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Slope scale for LE LUT underflow/overflow extrapolation            │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [15:0]  LUT_LE_SLOPE_UFLOW_SCALE - Underflow scale (signed 16-bit)       │
+│   [31:16] LUT_LE_SLOPE_OFLOW_SCALE - Overflow scale (signed 16-bit)        │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(S_LUT_LE_SLOPE_SCALE, 0x00000000);  // No slope                │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 16. S_LUT_LE_SLOPE_SHIFT (0xD03C)                                [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Slope shift for LE LUT underflow/overflow extrapolation            │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [4:0] LUT_LE_SLOPE_UFLOW_SHIFT - Signed, right shift if positive         │
+│   [9:5] LUT_LE_SLOPE_OFLOW_SHIFT - Signed, right shift if positive         │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(S_LUT_LE_SLOPE_SHIFT, 0x000);                                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 17-18. S_LUT_LO_SLOPE_SCALE/SHIFT (0xD040, 0xD044)              [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Slope scale/shift for LO LUT underflow/overflow                    │
+│                                                                              │
+│ BIT LAYOUT: Same as LE slope registers                                      │
+│   SCALE: [15:0]=uflow, [31:16]=oflow (signed 16-bit each)                  │
+│   SHIFT: [4:0]=uflow, [9:5]=oflow (signed 5-bit each)                      │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(S_LUT_LO_SLOPE_SCALE, 0x00000000);                             │
+│   write_reg(S_LUT_LO_SLOPE_SHIFT, 0x000);                                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+────────────────────────────────────────────────────────────────────────────────
+                     DUAL-GROUPED D_ REGISTERS
+────────────────────────────────────────────────────────────────────────────────
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 19. D_OP_ENABLE (0xD048)                                         [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Trigger to start CDP operation                                     │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] OP_EN - Operation enable                                              │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = DISABLE - No operation                                              │
+│   0x1 = ENABLE  - Start CDP processing (auto-clears after operation)        │
+│                                                                              │
+│ USAGE:                                                                       │
+│   // Configure all registers, enable RDMA first, then:                      │
+│   write_reg(CDP_D_OP_ENABLE, 0x1);  // Start CDP                           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 20. D_FUNC_BYPASS (0xD04C)                                       [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Bypass controls for the CDP datapath stages                        │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] SQSUM_BYPASS - Bypass square-sum computation                          │
+│   [1] MUL_BYPASS   - Bypass multiplier after LUT interpolation              │
+│                                                                              │
+│ VALUES (each bit):                                                          │
+│   0x0 = DISABLE - Normal operation (no bypass)                              │
+│   0x1 = ENABLE  - Bypass the function                                       │
+│                                                                              │
+│ NOTES:                                                                       │
+│   SQSUM_BYPASS: When enabled, input goes directly to LUT without squaring   │
+│   MUL_BYPASS:   When enabled, LUT output is not multiplied with input       │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_FUNC_BYPASS, 0x0);  // Normal LRN operation                  │
+│   write_reg(D_FUNC_BYPASS, 0x1);  // Bypass sqsum only                     │
+│   write_reg(D_FUNC_BYPASS, 0x3);  // Bypass both sqsum and mul             │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 21-22. D_DST_BASE_ADDR_LOW/HIGH (0xD050, 0xD054)                [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Base address for output data cube in memory                        │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   LOW:  [31:0] DST_BASE_ADDR_LOW  - Lower 32 bits                          │
+│   HIGH: [31:0] DST_BASE_ADDR_HIGH - Upper 32 bits                          │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DST_BASE_ADDR_LOW, 0x00000100);  // Output at offset 0x100   │
+│   write_reg(D_DST_BASE_ADDR_HIGH, 0x00000000);                             │
+│   // Must not overlap source data region                                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 23. D_DST_LINE_STRIDE (0xD058)                                   [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Stride in bytes between consecutive output lines                   │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] DST_LINE_STRIDE                                                    │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DST_LINE_STRIDE, 0x00000008);  // 8 bytes per line           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 24. D_DST_SURFACE_STRIDE (0xD05C)                                [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Stride in bytes between consecutive output surfaces                │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] DST_SURFACE_STRIDE                                                 │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DST_SURFACE_STRIDE, 0x00000040);  // 64 bytes per surface    │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 25. D_DST_DMA_CFG (0xD060)                                      [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Select memory type for output data                                 │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] DST_RAM_TYPE                                                          │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = CV - On-chip SRAM                                                   │
+│   0x1 = MC - External memory                                                │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DST_DMA_CFG, 0x1);  // Write to external memory              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 26. D_DST_COMPRESSION_EN (0xD064)                                [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Output compression (always disabled in v1.0)                       │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = DISABLE - Always this value in NVDLA v1.0                           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 27. D_DATA_FORMAT (0xD068)                                       [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Input data type for CDP core processing                            │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [1:0] INPUT_DATA_TYPE                                                     │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = INT8  - 8-bit signed integer (reset default=INT16)                  │
+│   0x1 = INT16 - 16-bit signed integer (hardware reset value)               │
+│   0x2 = FP16  - 16-bit floating point                                       │
+│                                                                              │
+│ NOTES:                                                                       │
+│   Must match CDP_RDMA D_DATA_FORMAT                                         │
+│   Hardware reset value is 0x1 (INT16), so explicitly set for INT8           │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DATA_FORMAT, 0x0);  // INT8 mode                             │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 28. D_NAN_FLUSH_TO_ZERO (0xD06C)                                 [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Option to flush NaN inputs to zero (FP16 mode only)                │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] NAN_TO_ZERO                                                           │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = DISABLE - Keep NaN values (propagate through pipeline)              │
+│   0x1 = ENABLE  - Replace NaN with 0 before processing                     │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_NAN_FLUSH_TO_ZERO, 0x0);  // INT8 mode: NaN irrelevant       │
+│   write_reg(D_NAN_FLUSH_TO_ZERO, 0x1);  // FP16 mode: flush NaN            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 29. D_LRN_CFG (0xD070)                                           [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Local Response Normalization configuration                         │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [1:0] NORMALZ_LEN - Number of channels to sum over                       │
+│                                                                              │
+│ VALUES:                                                                      │
+│   0x0 = LEN3 - Sum over 3 channels (center ± 1)                            │
+│   0x1 = LEN5 - Sum over 5 channels (center ± 2)                            │
+│   0x2 = LEN7 - Sum over 7 channels (center ± 3)                            │
+│   0x3 = LEN9 - Sum over 9 channels (center ± 4)                            │
+│                                                                              │
+│ NOTES:                                                                       │
+│   This determines the local neighborhood for channel normalization.         │
+│   The bufferin stage prepends/appends zero-padded channels as needed.       │
+│   Square-sum is computed across the neighborhood before LUT lookup.         │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_LRN_CFG, 0x1);  // LEN5: sum over 5 channels                │
+│   write_reg(D_LRN_CFG, 0x0);  // LEN3: sum over 3 channels (minimum)      │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 30. D_DATIN_OFFSET (0xD074)                                      [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Input data convertor offset (applied before LRN processing)        │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [15:0] DATIN_OFFSET - Signed offset                                       │
+│                                                                              │
+│ NOTES:                                                                       │
+│   8 bits used for INT8, 16 bits for INT16, 16 bits for FP16                │
+│   Applied as: converted = (input + offset) × scale >> shifter              │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DATIN_OFFSET, 0x0000);  // No offset                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 31. D_DATIN_SCALE (0xD078)                                       [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Input data convertor scaling factor                                │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [15:0] DATIN_SCALE - Signed scale factor                                  │
+│                                                                              │
+│ NOTES:                                                                       │
+│   Reset value = 1 (identity scale)                                          │
+│   Applied as: converted = (input + offset) × scale >> shifter              │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DATIN_SCALE, 0x0001);  // Identity scale (1×)                │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 32. D_DATIN_SHIFTER (0xD07C)                                     [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Input data convertor shift factor                                  │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [4:0] DATIN_SHIFTER - Unsigned shift factor (0-31)                        │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DATIN_SHIFTER, 0x00);  // No shift                           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 33. D_DATOUT_OFFSET (0xD080)                                     [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Output data convertor offset (applied after LRN processing)        │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] DATOUT_OFFSET - Signed offset                                      │
+│                                                                              │
+│ NOTES:                                                                       │
+│   25 bits used for INT8, 32 bits for INT16, 16 bits for FP16               │
+│   Applied as: output = (lut_result × input + offset) × scale >> shifter    │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DATOUT_OFFSET, 0x00000000);  // No offset                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 34. D_DATOUT_SCALE (0xD084)                                      [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Output data convertor scaling factor                               │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [15:0] DATOUT_SCALE - Signed scale factor                                 │
+│                                                                              │
+│ NOTES:                                                                       │
+│   Reset value = 1 (identity scale)                                          │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DATOUT_SCALE, 0x0001);  // Identity scale                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 35. D_DATOUT_SHIFTER (0xD088)                                    [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Output data convertor shift factor                                 │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [5:0] DATOUT_SHIFTER - Unsigned shift factor (0-63)                       │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_DATOUT_SHIFTER, 0x00);  // No shift                          │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 36. D_NAN_INPUT_NUM (0xD08C)                                     [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Count of input NaN elements detected during operation              │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] NAN_INPUT_NUM                                                      │
+│                                                                              │
+│ USAGE:                                                                       │
+│   nan_count = read_reg(D_NAN_INPUT_NUM);  // After operation                │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 37. D_INF_INPUT_NUM (0xD090)                                     [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Count of input Infinity elements detected during operation         │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] INF_INPUT_NUM                                                      │
+│                                                                              │
+│ USAGE:                                                                       │
+│   inf_count = read_reg(D_INF_INPUT_NUM);                                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 38. D_NAN_OUTPUT_NUM (0xD094)                                    [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Count of output NaN elements produced                              │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] NAN_OUTPUT_NUM                                                     │
+│                                                                              │
+│ USAGE:                                                                       │
+│   nan_out = read_reg(D_NAN_OUTPUT_NUM);                                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 39. D_OUT_SATURATION (0xD098)                                    [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Count of saturated elements in output                              │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [31:0] OUT_SATURATION                                                     │
+│                                                                              │
+│ USAGE:                                                                       │
+│   sat_count = read_reg(D_OUT_SATURATION);                                   │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 40. D_PERF_ENABLE (0xD09C)                                       [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Enable performance and LUT hit/miss counters                       │
+│                                                                              │
+│ BIT LAYOUT:                                                                  │
+│   [0] DMA_EN - Enable DMA write stall counter                              │
+│   [1] LUT_EN - Enable LUT performance counters                             │
+│                                                                              │
+│ VALUES (each bit):                                                          │
+│   0x0 = DISABLE                                                             │
+│   0x1 = ENABLE                                                              │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_PERF_ENABLE, 0x3);  // Enable both DMA and LUT counters      │
+│   write_reg(D_PERF_ENABLE, 0x0);  // Disable all counters                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 41. D_PERF_WRITE_STALL (0xD0A0)                                  [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Write DMA stall cycle count                                        │
+│                                                                              │
+│ BIT LAYOUT: [31:0] PERF_WRITE_STALL                                        │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 42-46. D_PERF_LUT_* (0xD0A4 - 0xD0B4)                           [READ ONLY] │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ D_PERF_LUT_UFLOW  (0xD0A4) - Elements where both LUTs underflowed          │
+│ D_PERF_LUT_OFLOW  (0xD0A8) - Elements where both LUTs overflowed           │
+│ D_PERF_LUT_HYBRID (0xD0AC) - Elements where one over/one underflowed       │
+│ D_PERF_LUT_LE_HIT (0xD0B0) - Elements that hit LE table only               │
+│ D_PERF_LUT_LO_HIT (0xD0B4) - Elements that hit LO table only              │
+│                                                                              │
+│ All [31:0], valid after operation with LUT_EN=1                             │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 47. D_CYA (0xD0B8)                                               [READ/WRITE]│
+├──────────────────────────────────────────────────────────────────────────────┤
+│ MEANING: Debug/vendor register                                              │
+│                                                                              │
+│ BIT LAYOUT: [31:0] CYA                                                      │
+│                                                                              │
+│ USAGE:                                                                       │
+│   write_reg(D_CYA, 0x0);  // Typically left at 0                           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+              COMPLETE PROGRAMMING EXAMPLE (INT8, Simple LRN)
+═══════════════════════════════════════════════════════════════════════════════
+
+// --- 1. Poll Status ---
+while (read_reg(0xC000) & 0x3) {}   // Wait RDMA idle
+while (read_reg(0xD000) & 0x3) {}   // Wait CDP idle
+
+// --- 2. Select Group 0 ---
+write_reg(0xC004, 0x0);   // RDMA S_POINTER = Group 0
+write_reg(0xD004, 0x0);   // CDP  S_POINTER = Group 0
+
+// --- 3. Setup LUT (identity LUT example for simple pass-through) ---
+// Write LE table (65 entries)
+write_reg(0xD008, 0x20000);   // S_LUT_ACCESS_CFG: table=LE, write, addr=0
+for (i = 0; i < 65; i++)
+    write_reg(0xD00C, lut_le_values[i]);  // S_LUT_ACCESS_DATA
+
+// Write LO table (257 entries)
+write_reg(0xD008, 0x30000);   // S_LUT_ACCESS_CFG: table=LO, write, addr=0
+for (i = 0; i < 257; i++)
+    write_reg(0xD00C, lut_lo_values[i]);  // S_LUT_ACCESS_DATA
+
+// LUT configuration
+write_reg(0xD010, 0x00);      // S_LUT_CFG: LE=exponent, all priority=LE
+write_reg(0xD014, 0x000000);  // S_LUT_INFO: all offsets/selects=0
+write_reg(0xD018, 0x00000000); // S_LUT_LE_START_LOW
+write_reg(0xD01C, 0x00);      // S_LUT_LE_START_HIGH
+write_reg(0xD020, 0x0000FFFF); // S_LUT_LE_END_LOW
+write_reg(0xD024, 0x00);      // S_LUT_LE_END_HIGH
+write_reg(0xD028, 0x00000000); // S_LUT_LO_START_LOW
+write_reg(0xD02C, 0x00);      // S_LUT_LO_START_HIGH
+write_reg(0xD030, 0x0000FFFF); // S_LUT_LO_END_LOW
+write_reg(0xD034, 0x00);      // S_LUT_LO_END_HIGH
+write_reg(0xD038, 0x00000000); // S_LUT_LE_SLOPE_SCALE
+write_reg(0xD03C, 0x000);     // S_LUT_LE_SLOPE_SHIFT
+write_reg(0xD040, 0x00000000); // S_LUT_LO_SLOPE_SCALE
+write_reg(0xD044, 0x000);     // S_LUT_LO_SLOPE_SHIFT
+
+// --- 4. Configure RDMA ---
+write_reg(0xC00C, 7);         // D_DATA_CUBE_WIDTH:   8 elements
+write_reg(0xC010, 7);         // D_DATA_CUBE_HEIGHT:  8 elements
+write_reg(0xC014, 7);         // D_DATA_CUBE_CHANNEL: 8 channels
+write_reg(0xC018, 0x00000000); // D_SRC_BASE_ADDR_LOW
+write_reg(0xC01C, 0x00000000); // D_SRC_BASE_ADDR_HIGH
+write_reg(0xC020, 0x00000008); // D_SRC_LINE_STRIDE:   8 bytes
+write_reg(0xC024, 0x00000040); // D_SRC_SURFACE_STRIDE: 64 bytes
+write_reg(0xC028, 0x1);       // D_SRC_DMA_CFG: MC (external memory)
+write_reg(0xC034, 0x0);       // D_DATA_FORMAT: INT8
+
+// --- 5. Configure CDP ---
+write_reg(0xD04C, 0x0);       // D_FUNC_BYPASS: no bypass
+write_reg(0xD050, 0x00000100); // D_DST_BASE_ADDR_LOW
+write_reg(0xD054, 0x00000000); // D_DST_BASE_ADDR_HIGH
+write_reg(0xD058, 0x00000008); // D_DST_LINE_STRIDE
+write_reg(0xD05C, 0x00000040); // D_DST_SURFACE_STRIDE
+write_reg(0xD060, 0x1);       // D_DST_DMA_CFG: MC
+write_reg(0xD068, 0x0);       // D_DATA_FORMAT: INT8
+write_reg(0xD06C, 0x0);       // D_NAN_FLUSH_TO_ZERO: disable
+write_reg(0xD070, 0x1);       // D_LRN_CFG: LEN5 (5-channel window)
+write_reg(0xD074, 0x0000);    // D_DATIN_OFFSET: 0
+write_reg(0xD078, 0x0001);    // D_DATIN_SCALE: 1
+write_reg(0xD07C, 0x00);      // D_DATIN_SHIFTER: 0
+write_reg(0xD080, 0x00000000); // D_DATOUT_OFFSET: 0
+write_reg(0xD084, 0x0001);    // D_DATOUT_SCALE: 1
+write_reg(0xD088, 0x00);      // D_DATOUT_SHIFTER: 0
+
+// --- 6. Enable (RDMA first, then CDP) ---
+write_reg(0xC008, 0x1);       // CDP_RDMA D_OP_ENABLE
+write_reg(0xD048, 0x1);       // CDP D_OP_ENABLE
+
+// --- 7. Wait for completion ---
+while (read_reg(0xD000) & 0x3) {}   // Poll CDP status until IDLE
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                              END OF GUIDE
+═══════════════════════════════════════════════════════════════════════════════
