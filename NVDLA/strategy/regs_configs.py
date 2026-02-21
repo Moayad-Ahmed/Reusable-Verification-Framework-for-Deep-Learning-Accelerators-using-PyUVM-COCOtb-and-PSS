@@ -3,7 +3,7 @@ from strategy.Layers_regs_addresses import PDP_REG
 from strategy.Layers_regs_addresses import PDP_RDMA_REG
 from strategy.Layers_regs_addresses import CDP_REG, CDP_RDMA_REG
 from strategy.Layers_regs_addresses import (
-    GLB_REG, CDMA_REG, CSC_REG, CMAC_A_REG, CMAC_B_REG, CACC_REG, SDP_REG
+    GLB_REG, CDMA_REG, CSC_REG, CMAC_A_REG, CMAC_B_REG, CACC_REG, SDP_REG,SDP_RDMA_REG,
 )
 
 
@@ -198,12 +198,12 @@ class RegistrationConfigs:
             # -------- PDP CORE: Pooling Padding --------
             (PDP_REG.D_POOLING_PADDING_CFG,           pdp_pad_cfg),
             (PDP_REG.D_POOLING_PADDING_VALUE_1_CFG,   pad_val_19),
-            (PDP_REG.D_POOLING_PADDING_VALUE_2_CFG,   pad_val_19),
-            (PDP_REG.D_POOLING_PADDING_VALUE_3_CFG,   pad_val_19),
-            (PDP_REG.D_POOLING_PADDING_VALUE_4_CFG,   pad_val_19),
-            (PDP_REG.D_POOLING_PADDING_VALUE_5_CFG,   pad_val_19),
-            (PDP_REG.D_POOLING_PADDING_VALUE_6_CFG,   pad_val_19),
-            (PDP_REG.D_POOLING_PADDING_VALUE_7_CFG,   pad_val_19),
+            (PDP_REG.D_POOLING_PADDING_VALUE_2_CFG,   2*pad_val_19),
+            (PDP_REG.D_POOLING_PADDING_VALUE_3_CFG,   3*pad_val_19),
+            (PDP_REG.D_POOLING_PADDING_VALUE_4_CFG,   4*pad_val_19),
+            (PDP_REG.D_POOLING_PADDING_VALUE_5_CFG,   5*pad_val_19),
+            (PDP_REG.D_POOLING_PADDING_VALUE_6_CFG,   6*pad_val_19),
+            (PDP_REG.D_POOLING_PADDING_VALUE_7_CFG,   7*pad_val_19),
 
             # -------- PDP CORE: Source Memory --------
             (PDP_REG.D_SRC_BASE_ADDR_LOW,  src_addr_low),
@@ -514,8 +514,286 @@ class RegistrationConfigs:
         conv_config = FullyConnectedStrategy.fc_to_conv_config(fc_config)
         return self.conv_configs(conv_config, input_addr, weight_addr, output_addr)
 
-    def activation_configs(self):
-        pass
+    def activation_configs(self, layer_configs, src_addr=0x0, dst_addr=0x100):
+        """
+        Build SDP + SDP_RDMA register list for standalone activation.
+
+        SDP operates in non-flying mode: data is read from DRAM via SDP_RDMA,
+        processed through the SDP pipeline, and written back to DRAM via WDMA.
+
+        Supported activation_type values:
+            'relu'    : BS stage ReLU only
+            'prelu'   : BS stage MUL in PReLU mode
+            'sigmoid' : EW stage LUT (requires LUT table programming)
+            'tanh'    : EW stage LUT (requires LUT table programming)
+            'clamp'   : BS ALU=MAX(min) + BN ALU=MIN(max)
+
+        Args:
+            layer_configs: dict from YAML with activation parameters
+            src_addr: DRAM base address of input data
+            dst_addr: DRAM base address for output data
+        """
+        act_type = layer_configs['activation_type']
+
+        # ── extract dimensions ────────────────────────────────────────
+        input_shape = layer_configs['input_shape']
+        in_h = input_shape[0]
+        in_w = input_shape[1]
+        channels = input_shape[2] if len(input_shape) == 3 else 1
+
+        data_fmt = layer_configs.get('data_format', 'INT8')
+        bpe = _BYTES_PER_EL.get(data_fmt, 1)
+        fmt_enc = _DATA_FMT.get(data_fmt, 0)
+
+        ATOM = 8
+        atoms_per_pixel = max(1, (channels * bpe + ATOM - 1) // ATOM)
+        pixel_bytes = atoms_per_pixel * ATOM
+
+        # For activation, output shape == input shape
+        out_h = in_h
+        out_w = in_w
+
+        # Memory strides
+        src_line_stride    = in_w * pixel_bytes
+        src_surface_stride = src_line_stride * in_h
+        dst_line_stride    = out_w * pixel_bytes
+        dst_surface_stride = dst_line_stride * out_h
+
+        src_lo, src_hi = self._split_addr(src_addr)
+        dst_lo, dst_hi = self._split_addr(dst_addr)
+
+        # ── build stage config based on activation type ───────────────
+        if act_type == 'relu':
+            bs_cfg = 0x00000012    # alu bypass, mul bypass, relu ON
+            bn_cfg = 0x00000001    # bypass
+            ew_cfg = 0x00000001    # bypass
+            bs_alu_cfg = 0x0
+            bs_alu_val = 0x0
+            bs_mul_cfg = 0x0
+            bs_mul_val = 0x0
+            bn_alu_cfg = 0x0
+            bn_alu_val = 0x0
+            cvt_offset = 0
+            cvt_scale  = 1
+            cvt_shift  = 0
+
+        elif act_type == 'prelu':
+            leak_float = layer_configs['leak_factor']
+            mul_shift  = layer_configs.get('prelu_shift', 8)
+            from strategy.activation_strategy import ActivationStrategy
+            leak_quant, _ = ActivationStrategy.quantize_leak_factor(
+                leak_float, mul_shift
+            )
+            # BS: alu bypass, mul ON, prelu=1, relu bypass
+            # bit[0]=0(active), bit[1]=1(alu_bypass), bit[4]=0(mul_on),
+            # bit[5]=1(prelu), bit[6]=1(relu bypass)
+            bs_cfg = 0x00000062
+            bn_cfg = 0x00000001
+            ew_cfg = 0x00000001
+            bs_alu_cfg = 0x0
+            bs_alu_val = 0x0
+            bs_mul_cfg = (mul_shift & 0xFF) << 8   # src=REG, shift
+            bs_mul_val = leak_quant & 0xFFFF
+            bn_alu_cfg = 0x0
+            bn_alu_val = 0x0
+            cvt_offset = 0
+            cvt_scale  = 1
+            cvt_shift  = 0
+
+        elif act_type == 'clamp':
+            clamp_min = layer_configs['clamp_min']
+            clamp_max = layer_configs['clamp_max']
+            # BS: alu=MAX(algo=0), alu_bypass=0, mul_bypass=1, relu_bypass=1
+            # bit[0]=0, bit[1]=0(alu ON), bit[3:2]=00(MAX), bit[4]=1(mul byp),
+            # bit[6]=1(relu byp) → 0x50
+            bs_cfg = 0x00000050
+            # BN: alu=MIN(algo=1), alu_bypass=0, mul_bypass=1, relu_bypass=1
+            # bit[0]=0, bit[1]=0, bit[3:2]=01(MIN), bit[4]=1(mul byp),
+            # bit[6]=1(relu byp) → 0x54
+            bn_cfg = 0x00000054
+            ew_cfg = 0x00000001
+            bs_alu_cfg = 0x0   # src=REG
+            bs_alu_val = clamp_min & 0xFFFF
+            bs_mul_cfg = 0x0
+            bs_mul_val = 0x0
+            bn_alu_cfg = 0x0   # src=REG
+            bn_alu_val = clamp_max & 0xFFFF
+            cvt_offset = 0
+            cvt_scale  = 1
+            cvt_shift  = 0
+
+        elif act_type in ('sigmoid', 'tanh'):
+            # LUT-based: all stages bypass except EW with LUT enabled
+            bs_cfg = 0x00000001
+            bn_cfg = 0x00000001
+            # EW: active, alu bypass, mul bypass, LUT ON
+            ew_cfg = 0x00000012
+            bs_alu_cfg = 0x0
+            bs_alu_val = 0x0
+            bs_mul_cfg = 0x0
+            bs_mul_val = 0x0
+            bn_alu_cfg = 0x0
+            bn_alu_val = 0x0
+            cvt_offset = layer_configs.get('cvt_offset', 0)
+            cvt_scale  = layer_configs.get('cvt_scale', 1)
+            cvt_shift  = layer_configs.get('cvt_shift', 0)
+        else:
+            raise ValueError(f"Unsupported activation: {act_type}")
+
+        # ── build LUT register writes (for sigmoid/tanh) ─────────────
+        lut_regs = []
+        if act_type in ('sigmoid', 'tanh'):
+            from strategy.activation_strategy import ActivationStrategy
+            frac_bits = layer_configs.get('lut_frac_bits', 15)
+
+            if act_type == 'sigmoid':
+                x_min = layer_configs.get('lut_range_min', -8.0)
+                x_max = layer_configs.get('lut_range_max', 8.0)
+                lo_table = ActivationStrategy.generate_lo_lut_sigmoid(
+                    frac_bits, x_min, x_max)
+                le_table = ActivationStrategy.generate_le_lut_sigmoid(
+                    frac_bits, x_min, x_max)
+            else:  # tanh
+                x_min = layer_configs.get('lut_range_min', -4.0)
+                x_max = layer_configs.get('lut_range_max', 4.0)
+                lo_table = ActivationStrategy.generate_lo_lut_tanh(
+                    frac_bits, x_min, x_max)
+                le_table = ActivationStrategy.generate_le_lut_tanh(
+                    frac_bits, x_min, x_max)
+
+            # Convert range to INT32 (Q0 fixed-point from float)
+            range_scale = 1 << frac_bits
+            le_start = int(round(x_min * range_scale)) & 0xFFFFFFFF
+            le_end   = int(round(x_max * range_scale)) & 0xFFFFFFFF
+            lo_start = le_start
+            lo_end   = le_end
+
+            # LO index select: determines right-shift for linear indexing
+            # lo_index_select = floor(log2((range / 256))) in fixed-point terms
+            lo_idx_sel = max(0, frac_bits - 8)  # simplified
+
+            # Program LE table (65 entries, table_id=0)
+            for i in range(65):
+                cfg_val = (i & 0x3FF) | (0 << 16) | (1 << 17)  # LE, WRITE
+                lut_regs.append((SDP_REG.S_LUT_ACCESS_CFG, cfg_val))
+                lut_regs.append((SDP_REG.S_LUT_ACCESS_DATA,
+                                 int(le_table[i]) & 0xFFFF))
+
+            # Program LO table (257 entries, table_id=1)
+            for i in range(257):
+                cfg_val = (i & 0x3FF) | (1 << 16) | (1 << 17)  # LO, WRITE
+                lut_regs.append((SDP_REG.S_LUT_ACCESS_CFG, cfg_val))
+                lut_regs.append((SDP_REG.S_LUT_ACCESS_DATA,
+                                 int(lo_table[i]) & 0xFFFF))
+
+            # LUT configuration registers
+            # S_LUT_CFG: le_function=1(LINEAR), priorities=LO for all
+            lut_regs.append((SDP_REG.S_LUT_CFG,
+                             0x00000001 | (1 << 4) | (1 << 5) | (1 << 6)))
+            # S_LUT_INFO: le_index_select=7, lo_index_select
+            lut_regs.append((SDP_REG.S_LUT_INFO,
+                             (0 & 0xFF) | ((7 & 0xFF) << 8) |
+                             ((lo_idx_sel & 0xFF) << 16)))
+            # Ranges
+            lut_regs.append((SDP_REG.S_LUT_LE_START, le_start))
+            lut_regs.append((SDP_REG.S_LUT_LE_END,   le_end))
+            lut_regs.append((SDP_REG.S_LUT_LO_START, lo_start))
+            lut_regs.append((SDP_REG.S_LUT_LO_END,   lo_end))
+            # Slopes: 0 for saturating functions (sigmoid/tanh)
+            lut_regs.append((SDP_REG.S_LUT_LE_SLOPE_SCALE, 0x00000000))
+            lut_regs.append((SDP_REG.S_LUT_LE_SLOPE_SHIFT, 0x00000000))
+            lut_regs.append((SDP_REG.S_LUT_LO_SLOPE_SCALE, 0x00000000))
+            lut_regs.append((SDP_REG.S_LUT_LO_SLOPE_SHIFT, 0x00000000))
+
+        # ── SDP_RDMA feature mode ────────────────────────────────────
+        # flying_mode=0 (OFF — standalone, read from DRAM)
+        # in_precision=INT8, proc_precision=INT8, out_precision=INT8
+        rdma_feature_cfg = 0x00000000  # flying=0, INT8 all
+
+        # ═══════════ BUILD REGISTER LIST ═══════════════════════════════
+        regs = [
+            # ── GLB: interrupt config ─────────────────────────────────
+            (GLB_REG.S_INTR_MASK,   0x003F03FC),  # unmask SDP_done
+            (GLB_REG.S_INTR_STATUS, 0x00000000),
+
+            # ── SDP: pointer ──────────────────────────────────────────
+            (SDP_REG.S_POINTER, 0x00000000),
+        ]
+
+        # ── LUT tables and config (if sigmoid/tanh) ──────────────────
+        regs.extend(lut_regs)
+
+        # ── SDP: data cube dimensions ─────────────────────────────────
+        regs.extend([
+            (SDP_REG.D_DATA_CUBE_WIDTH,    out_w - 1),
+            (SDP_REG.D_DATA_CUBE_HEIGHT,   out_h - 1),
+            (SDP_REG.D_DATA_CUBE_CHANNEL,  channels - 1),
+            # ── SDP: destination memory ────────────────────────────────
+            (SDP_REG.D_DST_BASE_ADDR_LOW,  dst_lo),
+            (SDP_REG.D_DST_BASE_ADDR_HIGH, dst_hi),
+            (SDP_REG.D_DST_LINE_STRIDE,    dst_line_stride),
+            (SDP_REG.D_DST_SURFACE_STRIDE, dst_surface_stride),
+            # ── SDP: BS sub-processor ─────────────────────────────────
+            (SDP_REG.D_DP_BS_CFG,          bs_cfg),
+            (SDP_REG.D_DP_BS_ALU_CFG,      bs_alu_cfg),
+            (SDP_REG.D_DP_BS_ALU_SRC_VALUE, bs_alu_val),
+            (SDP_REG.D_DP_BS_MUL_CFG,      bs_mul_cfg),
+            (SDP_REG.D_DP_BS_MUL_SRC_VALUE, bs_mul_val),
+            # ── SDP: BN sub-processor ─────────────────────────────────
+            (SDP_REG.D_DP_BN_CFG,          bn_cfg),
+            (SDP_REG.D_DP_BN_ALU_CFG,      bn_alu_cfg),
+            (SDP_REG.D_DP_BN_ALU_SRC_VALUE, bn_alu_val),
+            (SDP_REG.D_DP_BN_MUL_CFG,      0x00000000),
+            (SDP_REG.D_DP_BN_MUL_SRC_VALUE, 0x00000000),
+            # ── SDP: EW sub-processor ─────────────────────────────────
+            (SDP_REG.D_DP_EW_CFG,          ew_cfg),
+            (SDP_REG.D_DP_EW_ALU_CFG,      0x00000002),   # cvt bypass
+            (SDP_REG.D_DP_EW_ALU_SRC_VALUE, 0x00000000),
+            (SDP_REG.D_DP_EW_ALU_CVT_OFFSET,  0x00000000),
+            (SDP_REG.D_DP_EW_ALU_CVT_SCALE,   0x00000001),
+            (SDP_REG.D_DP_EW_ALU_CVT_TRUNCATE, 0x00000000),
+            (SDP_REG.D_DP_EW_MUL_CFG,      0x00000002),   # cvt bypass
+            (SDP_REG.D_DP_EW_MUL_SRC_VALUE, 0x00000001),
+            (SDP_REG.D_DP_EW_MUL_CVT_OFFSET,  0x00000000),
+            (SDP_REG.D_DP_EW_MUL_CVT_SCALE,   0x00000001),
+            (SDP_REG.D_DP_EW_MUL_CVT_TRUNCATE, 0x00000000),
+            (SDP_REG.D_DP_EW_TRUNCATE_VALUE, 0x00000000),
+            # ── SDP: feature mode (non-flying) ────────────────────────
+            (SDP_REG.D_FEATURE_MODE_CFG, 0x00000000),  # flying=0 (standalone)
+            (SDP_REG.D_DST_DMA_CFG,     0x00000001),   # MC DRAM
+            (SDP_REG.D_DATA_FORMAT,      fmt_enc),      # INT8→INT8
+            # ── SDP: output converter ─────────────────────────────────
+            (SDP_REG.D_CVT_OFFSET, cvt_offset & 0xFFFFFFFF),
+            (SDP_REG.D_CVT_SCALE,  cvt_scale  & 0xFFFF),
+            (SDP_REG.D_CVT_SHIFT,  cvt_shift  & 0x3F),
+        ])
+
+        # ── SDP RDMA ──────────────────────────────────────────────────
+        regs.extend([
+            (SDP_RDMA_REG.S_POINTER,            0x00000000),
+            (SDP_RDMA_REG.D_DATA_CUBE_WIDTH,    in_w - 1),
+            (SDP_RDMA_REG.D_DATA_CUBE_HEIGHT,   in_h - 1),
+            (SDP_RDMA_REG.D_DATA_CUBE_CHANNEL,  channels - 1),
+            (SDP_RDMA_REG.D_SRC_BASE_ADDR_LOW,  src_lo),
+            (SDP_RDMA_REG.D_SRC_BASE_ADDR_HIGH, src_hi),
+            (SDP_RDMA_REG.D_SRC_LINE_STRIDE,    src_line_stride),
+            (SDP_RDMA_REG.D_SRC_SURFACE_STRIDE, src_surface_stride),
+            # Disable all sub-unit RDMAs (we use register operands)
+            (SDP_RDMA_REG.D_BRDMA_CFG,  0x00000001),   # disabled
+            (SDP_RDMA_REG.D_NRDMA_CFG,  0x00000001),   # disabled
+            (SDP_RDMA_REG.D_ERDMA_CFG,  0x00000001),   # disabled
+            # Feature mode: flying=0 (standalone), INT8
+            (SDP_RDMA_REG.D_FEATURE_MODE_CFG, rdma_feature_cfg),
+            (SDP_RDMA_REG.D_SRC_DMA_CFG,      0x00000001),  # MC DRAM
+        ])
+
+        # ── ENABLE: SDP_RDMA first, then SDP ──────────────────────────
+        regs.extend([
+            (SDP_RDMA_REG.D_OP_ENABLE, 0x00000001),
+            (SDP_REG.D_OP_ENABLE,      0x00000001),
+        ])
+
+        return regs
 
     def normalization_configs(self, layer_configs, src_addr=0x0, dst_addr=0x100):
         """

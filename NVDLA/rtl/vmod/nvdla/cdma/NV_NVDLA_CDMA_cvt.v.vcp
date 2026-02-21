@@ -50,6 +50,37 @@ module NV_NVDLA_CDMA_cvt (
 //: );
 //: }
   ,dc2cvt_dat_wr_info_pd
+  ,wg2cvt_dat_wr_en
+//: my $dmaif=64;
+//: my $atmc=8*8;
+//: if($dmaif < $atmc) {
+//: my $k = int(log(int($atmc/$dmaif))/log(2));
+//: print qq(
+//: ,wg2cvt_dat_wr_sel
+//: ,wg2cvt_dat_wr_addr
+//: ,wg2cvt_dat_wr_data
+//: );
+//: } elsif($dmaif > $atmc) {
+//: my $k = int(log(int($dmaif/$atmc))/log(2));
+//: print qq(
+//: ,wg2cvt_dat_wr_mask
+//: );
+//: foreach my $i (0..$k-1) {
+//: print qq(
+//: ,wg2cvt_dat_wr_addr${i}
+//: ,wg2cvt_dat_wr_data${i}
+//: );
+//: }
+//: } else {
+//: print qq(
+//: ,wg2cvt_dat_wr_addr
+//: ,wg2cvt_dat_wr_data
+//: );
+//: }
+// ,wg2cvt_dat_wr_addr
+// ,wg2cvt_dat_wr_hsel
+// ,wg2cvt_dat_wr_data
+  ,wg2cvt_dat_wr_info_pd
   ,img2cvt_dat_wr_en
 //: my $dmaif=64;
 //: my $atmc=8*8;
@@ -171,6 +202,37 @@ input [11:0] dc2cvt_dat_wr_info_pd;
 // input dc2cvt_dat_wr_hsel;
 // input [64 -1:0] dc2cvt_dat_wr_data;
 // input [11:0] dc2cvt_dat_wr_info_pd;
+input wg2cvt_dat_wr_en;
+//: my $dmaif=64;
+//: my $atmc=8*8;
+//: if($dmaif < $atmc) {
+//: my $k = int(log(int($atmc/$dmaif))/log(2));
+//: print qq(
+//: input [${k}-1:0] wg2cvt_dat_wr_sel;
+//: input [16:0] wg2cvt_dat_wr_addr;
+//: input [${dmaif}-1:0] wg2cvt_dat_wr_data;
+//: );
+//: } elsif($dmaif > $atmc) {
+//: my $k = int(log(int($dmaif/$atmc))/log(2));
+//: print qq(
+//: input [${k}-1:0] wg2cvt_dat_wr_mask;
+//: );
+//: foreach my $i (0..$k-1) {
+//: print qq(
+//: input [16:0] wg2cvt_dat_wr_addr${i};
+//: input [${dmaif}-1:0] wg2cvt_dat_wr_data${i};
+//: );
+//: }
+//: } else {
+//: print qq(
+//: input [16:0] wg2cvt_dat_wr_addr;
+//: input [${dmaif}-1:0] wg2cvt_dat_wr_data;
+//: );
+//: }
+// input [11:0] wg2cvt_dat_wr_addr;
+// input wg2cvt_dat_wr_hsel;
+// input [64 -1:0] wg2cvt_dat_wr_data;
+input [11:0] wg2cvt_dat_wr_info_pd;
 //////////////// img
 input img2cvt_dat_wr_en;
 //: my $dmaif=64;
@@ -432,6 +494,7 @@ assign slcg_hls_en = slcg_hls_en_d3;
 // Input signals //
 ////////////////////////////////////////////////////////////////////////
 assign cvt_wr_info_pd = ({12 {dc2cvt_dat_wr_en}} & dc2cvt_dat_wr_info_pd)
+                      | ({12 {wg2cvt_dat_wr_en}} & wg2cvt_dat_wr_info_pd)
                       | ({12 {img2cvt_dat_wr_en}} & img2cvt_dat_wr_info_pd);
 assign cvt_wr_mask[3:0] = cvt_wr_info_pd[3:0];
 //assign cvt_wr_interleave = cvt_wr_info_pd[4];
@@ -440,7 +503,7 @@ assign cvt_wr_mask[3:0] = cvt_wr_info_pd[3:0];
 assign cvt_wr_mean = cvt_wr_info_pd[7];
 assign cvt_wr_uint = cvt_wr_info_pd[8];
 assign cvt_wr_sub_h[2:0] = cvt_wr_info_pd[11:9];
-assign cvt_wr_en = (dc2cvt_dat_wr_en | img2cvt_dat_wr_en);
+assign cvt_wr_en = (dc2cvt_dat_wr_en | wg2cvt_dat_wr_en | img2cvt_dat_wr_en);
 //: my $dmaif=64;
 //: my $Bnum = $dmaif / 8;
 //: my $atmc=8*8;
@@ -449,10 +512,13 @@ assign cvt_wr_en = (dc2cvt_dat_wr_en | img2cvt_dat_wr_en);
 //: print qq(
 //: assign cvt_wr_pad_mask = img2cvt_dat_wr_en ? img2cvt_dat_wr_pad_mask : ${Bnum}'d0;
 //: assign cvt_wr_sel = dc2cvt_dat_wr_en ? dc2cvt_dat_wr_sel
+//: : wg2cvt_dat_wr_en ? wg2cvt_dat_wr_sel
 //: : img2cvt_dat_wr_en ? img2cvt_dat_wr_sel : 0;
 //: assign cvt_wr_addr = ({17 {dc2cvt_dat_wr_en}} & dc2cvt_dat_wr_addr)
+//: | ({17 {wg2cvt_dat_wr_en}} & wg2cvt_dat_wr_addr)
 //: | ({17 {img2cvt_dat_wr_en}} & img2cvt_dat_wr_addr);
 //: assign cvt_wr_data = ({64 {dc2cvt_dat_wr_en}} & dc2cvt_dat_wr_data)
+//: | ({64 {wg2cvt_dat_wr_en}} & wg2cvt_dat_wr_data)
 //: | ({64 {img2cvt_dat_wr_en}} & img2cvt_dat_wr_data);
 //: assign cvt_wr_mean_data = img2cvt_mn_wr_data;
 //: );
@@ -460,14 +526,17 @@ assign cvt_wr_en = (dc2cvt_dat_wr_en | img2cvt_dat_wr_en);
 //: my $k = int(log(int($dmaif/$atmc))/log(2));
 //: print qq(
 //: assign cvt_dat_wr_mask = (dc2cvt_dat_wr_en & dc2cvt_dat_wr_mask)
+//: | (wg2cvt_dat_wr_en & wg2cvt_dat_wr_mask)
 //: | (img2cvt_dat_wr_en & img2cvt_dat_wr_mask);
 //: );
 //: foreach my $i (0..$k-1) {
 //: print qq(
 //: assign cvt_wr_pad_mask${i} = img2cvt_dat_wr_en ? img2cvt_dat_wr_pad_mask${i} : ${Bnum}'d0;
 //: assign cvt_wr_addr${i} = ({17 {dc2cvt_dat_wr_en}} & dc2cvt_dat_wr_addr${i})
+//: | ({17 {wg2cvt_dat_wr_en}} & wg2cvt_dat_wr_addr${i})
 //: | ({17 {img2cvt_dat_wr_en}} & img2cvt_dat_wr_addr${i});
 //: assign cvt_wr_data${i} = ({64 {dc2cvt_dat_wr_en}} & dc2cvt_dat_wr_data${i})
+//: | ({64 {wg2cvt_dat_wr_en}} & wg2cvt_dat_wr_data${i})
 //: | ({64 {img2cvt_dat_wr_en}} & img2cvt_dat_wr_data${i});
 //: assign cvt_wr_mean_data${i} = img2cvt_mn_wr_data${i};
 //: );
@@ -476,8 +545,10 @@ assign cvt_wr_en = (dc2cvt_dat_wr_en | img2cvt_dat_wr_en);
 //: print qq(
 //: assign cvt_wr_pad_mask = img2cvt_dat_wr_en ? img2cvt_dat_wr_pad_mask : ${Bnum}'d0;
 //: assign cvt_wr_addr = ({17 {dc2cvt_dat_wr_en}} & dc2cvt_dat_wr_addr)
+//: | ({17 {wg2cvt_dat_wr_en}} & wg2cvt_dat_wr_addr)
 //: | ({17 {img2cvt_dat_wr_en}} & img2cvt_dat_wr_addr);
 //: assign cvt_wr_data = ({64 {dc2cvt_dat_wr_en}} & dc2cvt_dat_wr_data)
+//: | ({64 {wg2cvt_dat_wr_en}} & wg2cvt_dat_wr_data)
 //: | ({64 {img2cvt_dat_wr_en}} & img2cvt_dat_wr_data);
 //: assign cvt_wr_mean_data = img2cvt_mn_wr_data;
 //: );
@@ -843,7 +914,11 @@ assign dp2reg_inf_data_num = 32'b0;
   nv_assert_no_x #(0,1,0,"No X's allowed on control signals") zzz_assert_no_x_101x (nvdla_core_ng_clk, `ASSERT_RESET, 1'd1, (^(dat_cbuf_flush_vld_w))); // spyglass disable W504 SelfDeterminedExpr-ML 
   nv_assert_no_x #(0,1,0,"No X's allowed on control signals") zzz_assert_no_x_102x (nvdla_core_clk, `ASSERT_RESET, 1'd1, (^(nan_reg_en))); // spyglass disable W504 SelfDeterminedExpr-ML 
   nv_assert_no_x #(0,1,0,"No X's allowed on control signals") zzz_assert_no_x_103x (nvdla_core_clk, `ASSERT_RESET, 1'd1, (^(inf_reg_en))); // spyglass disable W504 SelfDeterminedExpr-ML 
-  nv_assert_zero_one_hot #(0,2,0,"Error! CVT input conflict!") zzz_assert_zero_one_hot_16x (nvdla_core_clk, `ASSERT_RESET, {dc2cvt_dat_wr_en, img2cvt_dat_wr_en}); // spyglass disable W504 SelfDeterminedExpr-ML 
+  nv_assert_zero_one_hot #(0,3,0,"Error! CVT input conflict!") zzz_assert_zero_one_hot_16x (nvdla_core_clk, `ASSERT_RESET, {dc2cvt_dat_wr_en, wg2cvt_dat_wr_en, img2cvt_dat_wr_en}); // spyglass disable W504 SelfDeterminedExpr-ML 
+  nv_assert_never #(0,0,"Error! Wg set two high masks") zzz_assert_never_19x (nvdla_core_clk, `ASSERT_RESET, (wg2cvt_dat_wr_en & (|cvt_wr_mask[3:2]))); // spyglass disable W504 SelfDeterminedExpr-ML 
+  nv_assert_never #(0,0,"Error! Wg set mean flag") zzz_assert_never_22x (nvdla_core_clk, `ASSERT_RESET, (wg2cvt_dat_wr_en & cvt_wr_mean)); // spyglass disable W504 SelfDeterminedExpr-ML 
+  nv_assert_never #(0,0,"Error! Wg set uint flag") zzz_assert_never_24x (nvdla_core_clk, `ASSERT_RESET, (wg2cvt_dat_wr_en & cvt_wr_uint)); // spyglass disable W504 SelfDeterminedExpr-ML 
+  nv_assert_never #(0,0,"Error! Wg set sub h flag") zzz_assert_never_26x (nvdla_core_clk, `ASSERT_RESET, (wg2cvt_dat_wr_en & (|cvt_wr_sub_h))); // spyglass disable W504 SelfDeterminedExpr-ML 
   nv_assert_never #(0,0,"Error! Disable when input data") zzz_assert_never_17x (nvdla_core_clk, `ASSERT_RESET, (~op_en & cvt_wr_en)); // spyglass disable W504 SelfDeterminedExpr-ML 
   nv_assert_never #(0,0,"Error! Dc set two high masks") zzz_assert_never_18x (nvdla_core_clk, `ASSERT_RESET, (dc2cvt_dat_wr_en & (|cvt_wr_mask[3:2]))); // spyglass disable W504 SelfDeterminedExpr-ML 
   nv_assert_never #(0,0,"Error! Img set two hight masks when int8 input") zzz_assert_never_20x (nvdla_core_clk, `ASSERT_RESET, (img2cvt_dat_wr_en & (|cvt_wr_mask[3:2]) & is_input_int8[0])); // spyglass disable W504 SelfDeterminedExpr-ML 

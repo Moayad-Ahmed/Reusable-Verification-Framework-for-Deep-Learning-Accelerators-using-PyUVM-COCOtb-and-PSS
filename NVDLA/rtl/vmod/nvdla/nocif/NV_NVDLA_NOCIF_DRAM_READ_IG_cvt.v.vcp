@@ -311,7 +311,7 @@ assign cq_wr_pd[5] = ig2cq_fdrop ;
 assign cq_wr_pd[6] = ig2cq_ldrop ;
 //:my $k = 7;
 //:my $i;
-//:my @dma_index = (0, 1, 1,1, 1,0, 1, 1, 0, 1,0,0,0,0,0,0);
+//:my @dma_index = (0, 1, 1,1, 1,0, 1, 1, 1, 1,0,0,0,0,0,0);
 //:my @client_id = (0,8,9,3,2,4,1,5,7,6,0,0,0,0,0,0);
 //:my @remap_clientid = (0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 //:my $nindex = 0;

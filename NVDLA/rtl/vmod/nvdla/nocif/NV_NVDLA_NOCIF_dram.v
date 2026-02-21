@@ -311,7 +311,7 @@ input noc2mcif_axi_r_rlast;
 input [64 -1:0] noc2mcif_axi_r_rdata;
 //:my $i;
 //:my $nindex=0;
-//: my @dma_index = (0, 1, 1,1, 1,0, 1, 1, 0, 1,0,0,0,0,0,0);
+//: my @dma_index = (0, 1, 1,1, 1,0, 1, 1, 1, 1,0,0,0,0,0,0);
 //: my @dma_name = ("bdma","cdma_dat","cdma_wt","cdp","pdp","rbk","sdp","sdp_b","sdp_e","sdp_n","na","na","na","na","na","na");
 //: for ($i=0;$i<16;$i++) {
 //: if ($dma_index[$i]) {
@@ -364,9 +364,12 @@ wire [7:0] client42mcif_rd_wt = reg2dp_rd_weight_sdp;
 
 wire [7:0] reg2dp_rd_weight_sdp_b;
 wire [7:0] client52mcif_rd_wt = reg2dp_rd_weight_sdp_b;
+
 wire [7:0] reg2dp_rd_weight_sdp_e;
+wire [7:0] client62mcif_rd_wt = reg2dp_rd_weight_sdp_e;
+
 wire [7:0] reg2dp_rd_weight_sdp_n;
-wire [7:0] client62mcif_rd_wt = reg2dp_rd_weight_sdp_n;
+wire [7:0] client72mcif_rd_wt = reg2dp_rd_weight_sdp_n;
 wire [7:0] reg2dp_wr_weight_bdma;
 wire [7:0] reg2dp_wr_weight_sdp;
 wire [7:0] client02mcif_wr_wt = reg2dp_wr_weight_sdp;

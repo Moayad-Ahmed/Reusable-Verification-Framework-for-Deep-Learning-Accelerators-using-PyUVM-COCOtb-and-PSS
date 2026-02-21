@@ -26,6 +26,7 @@
     `define CC_ATOMC_DIV_ATOMK_EQUAL_1
 //image stripe keep 2*atomK
 //batch keep 1
+`define CBUF_WEIGHT_COMPRESSED //whether need read WMB
 module NV_NVDLA_CSC_WL_dec (
    nvdla_core_clk
   ,nvdla_core_rstn

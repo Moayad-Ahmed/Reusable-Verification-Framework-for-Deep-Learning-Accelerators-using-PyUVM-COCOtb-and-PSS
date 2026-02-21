@@ -28,6 +28,13 @@ module NV_NVDLA_SDP_rdma (
   ,mcif2sdp_b_rd_rsp_pd //|< i
   ,mcif2sdp_b_rd_rsp_valid //|< i
   ,mcif2sdp_b_rd_rsp_ready //|> o
+  ,sdp_e2mcif_rd_cdt_lat_fifo_pop //|> o
+  ,sdp_e2mcif_rd_req_pd //|> o
+  ,sdp_e2mcif_rd_req_valid //|> o
+  ,sdp_e2mcif_rd_req_ready //|< i
+  ,mcif2sdp_e_rd_rsp_pd //|< i
+  ,mcif2sdp_e_rd_rsp_valid //|< i
+  ,mcif2sdp_e_rd_rsp_ready //|> o
   ,sdp_n2mcif_rd_cdt_lat_fifo_pop //|> o
   ,sdp_n2mcif_rd_req_pd //|> o
   ,sdp_n2mcif_rd_req_valid //|> o
@@ -48,6 +55,12 @@ module NV_NVDLA_SDP_rdma (
   ,sdp_brdma2dp_alu_valid //|> o
   ,sdp_brdma2dp_mul_pd //|> o
   ,sdp_brdma2dp_mul_valid //|> o
+  ,sdp_erdma2dp_alu_ready //|< i
+  ,sdp_erdma2dp_mul_ready //|< i
+  ,sdp_erdma2dp_alu_pd //|> o
+  ,sdp_erdma2dp_alu_valid //|> o
+  ,sdp_erdma2dp_mul_pd //|> o
+  ,sdp_erdma2dp_mul_valid //|> o
   ,sdp_nrdma2dp_alu_ready //|< i
   ,sdp_nrdma2dp_mul_ready //|< i
   ,sdp_nrdma2dp_alu_pd //|> o
@@ -97,6 +110,19 @@ output [8*16:0] sdp_brdma2dp_alu_pd;
 output sdp_brdma2dp_mul_valid;
 input sdp_brdma2dp_mul_ready;
 output [8*16:0] sdp_brdma2dp_mul_pd;
+output sdp_e2mcif_rd_cdt_lat_fifo_pop;
+output sdp_e2mcif_rd_req_valid;
+input sdp_e2mcif_rd_req_ready;
+output [47 -1:0] sdp_e2mcif_rd_req_pd;
+input mcif2sdp_e_rd_rsp_valid;
+output mcif2sdp_e_rd_rsp_ready;
+input [65 -1:0] mcif2sdp_e_rd_rsp_pd;
+output sdp_erdma2dp_alu_valid;
+input sdp_erdma2dp_alu_ready;
+output [8*16:0] sdp_erdma2dp_alu_pd;
+output sdp_erdma2dp_mul_valid;
+input sdp_erdma2dp_mul_ready;
+output [8*16:0] sdp_erdma2dp_mul_pd;
 output sdp_n2mcif_rd_cdt_lat_fifo_pop;
 output sdp_n2mcif_rd_req_valid;
 input sdp_n2mcif_rd_req_ready;
@@ -156,6 +182,18 @@ wire [31:0] reg2dp_bs_batch_stride;
 wire [31:0] reg2dp_bs_line_stride;
 wire [31:0] reg2dp_bs_surface_stride;
 wire [31:0] dp2reg_brdma_stall;
+wire erdma_op_en;
+wire reg2dp_erdma_data_mode;
+wire reg2dp_erdma_data_size;
+wire [1:0] reg2dp_erdma_data_use;
+wire reg2dp_erdma_disable;
+wire reg2dp_erdma_ram_type;
+wire [31:0] reg2dp_ew_base_addr_high;
+wire [31:0] reg2dp_ew_base_addr_low;
+wire [31:0] reg2dp_ew_batch_stride;
+wire [31:0] reg2dp_ew_line_stride;
+wire [31:0] reg2dp_ew_surface_stride;
+wire [31:0] dp2reg_erdma_stall;
 wire reg2dp_op_en;
 wire reg2dp_flying_mode;
 wire reg2dp_src_ram_type;
@@ -297,6 +335,48 @@ NV_NVDLA_SDP_nrdma u_nrdma (
   ,.dp2reg_done (nrdma_done) //|> w
   ,.dp2reg_nrdma_stall (dp2reg_nrdma_stall[31:0]) //|> w
   );
+NV_NVDLA_SDP_erdma u_erdma (
+   .nvdla_core_clk (nvdla_core_clk) //|< i
+  ,.nvdla_core_rstn (nvdla_core_rstn) //|< i
+  ,.pwrbus_ram_pd (pwrbus_ram_pd[31:0]) //|< i
+  ,.dla_clk_ovr_on_sync (dla_clk_ovr_on_sync) //|< i
+  ,.global_clk_ovr_on_sync (global_clk_ovr_on_sync) //|< i
+  ,.tmc2slcg_disable_clock_gating (tmc2slcg_disable_clock_gating) //|< i
+  ,.erdma_slcg_op_en (erdma_slcg_op_en) //|< w
+  ,.erdma_disable (erdma_disable) //|< w
+  ,.sdp_e2mcif_rd_cdt_lat_fifo_pop (sdp_e2mcif_rd_cdt_lat_fifo_pop) //|> o
+  ,.sdp_e2mcif_rd_req_valid (sdp_e2mcif_rd_req_valid) //|> o
+  ,.sdp_e2mcif_rd_req_ready (sdp_e2mcif_rd_req_ready) //|< i
+  ,.sdp_e2mcif_rd_req_pd (sdp_e2mcif_rd_req_pd[47 -1:0]) //|> o
+  ,.mcif2sdp_e_rd_rsp_valid (mcif2sdp_e_rd_rsp_valid) //|< i
+  ,.mcif2sdp_e_rd_rsp_ready (mcif2sdp_e_rd_rsp_ready) //|> o
+  ,.mcif2sdp_e_rd_rsp_pd (mcif2sdp_e_rd_rsp_pd[65 -1:0]) //|< i
+  ,.sdp_erdma2dp_alu_valid (sdp_erdma2dp_alu_valid) //|> o
+  ,.sdp_erdma2dp_alu_ready (sdp_erdma2dp_alu_ready) //|< i
+  ,.sdp_erdma2dp_alu_pd (sdp_erdma2dp_alu_pd[8*16:0]) //|> o
+  ,.sdp_erdma2dp_mul_valid (sdp_erdma2dp_mul_valid) //|> o
+  ,.sdp_erdma2dp_mul_ready (sdp_erdma2dp_mul_ready) //|< i
+  ,.sdp_erdma2dp_mul_pd (sdp_erdma2dp_mul_pd[8*16:0]) //|> o
+  ,.reg2dp_op_en (erdma_op_en) //|< w
+  ,.reg2dp_batch_number (reg2dp_batch_number[4:0]) //|< w
+  ,.reg2dp_winograd (reg2dp_winograd) //|< w
+  ,.reg2dp_channel (reg2dp_channel[12:0]) //|< w
+  ,.reg2dp_height (reg2dp_height[12:0]) //|< w
+  ,.reg2dp_width (reg2dp_width[12:0]) //|< w
+  ,.reg2dp_erdma_data_mode (reg2dp_erdma_data_mode) //|< w
+  ,.reg2dp_erdma_data_size (reg2dp_erdma_data_size) //|< w
+  ,.reg2dp_erdma_data_use (reg2dp_erdma_data_use[1:0]) //|< w
+  ,.reg2dp_erdma_ram_type (reg2dp_erdma_ram_type) //|< w
+  ,.reg2dp_ew_base_addr_high (reg2dp_ew_base_addr_high[31:0]) //|< w
+  ,.reg2dp_ew_base_addr_low (reg2dp_ew_base_addr_low[31:3]) //|< w
+  ,.reg2dp_ew_line_stride (reg2dp_ew_line_stride[31:3]) //|< w
+  ,.reg2dp_ew_surface_stride (reg2dp_ew_surface_stride[31:3]) //|< w
+  ,.reg2dp_out_precision (reg2dp_out_precision[1:0]) //|< w
+  ,.reg2dp_proc_precision (reg2dp_proc_precision[1:0]) //|< w
+  ,.reg2dp_perf_dma_en (reg2dp_perf_dma_en) //|< w
+  ,.dp2reg_done (erdma_done) //|> w
+  ,.dp2reg_erdma_stall (dp2reg_erdma_stall[31:0]) //|> w
+  );
 //=======================================
 // Configuration Register File
 assign mrdma_slcg_op_en = slcg_op_en[0];
@@ -341,13 +421,24 @@ always @(posedge nvdla_core_clk or negedge nvdla_core_rstn) begin
   end
 end
 assign nrdma_op_en = reg2dp_op_en & ~nrdma_done_pending & ~nrdma_disable;
-wire erdma_done_pending = 1'b0;
-assign erdma_done = 1'b0;
+reg erdma_done_pending;
+always @(posedge nvdla_core_clk or negedge nvdla_core_rstn) begin
+  if (!nvdla_core_rstn) begin
+    erdma_done_pending <= 1'b0;
+  end else begin
+   if (dp2reg_done) begin
+      erdma_done_pending <= 1'b0;
+   end else if (erdma_done) begin
+      erdma_done_pending <= 1'b1;
+   end
+  end
+end
+assign erdma_op_en = reg2dp_op_en & ~erdma_done_pending & ~erdma_disable;
 assign dp2reg_done = reg2dp_op_en & ((mrdma_done_pending || mrdma_done || mrdma_disable)&(brdma_done_pending || brdma_done || brdma_disable)&(nrdma_done_pending || nrdma_done || nrdma_disable)&(erdma_done_pending || erdma_done || erdma_disable));
 assign mrdma_disable = reg2dp_flying_mode == 1'h1 ;
 assign brdma_disable = reg2dp_brdma_disable == 1'h1 ;
 assign nrdma_disable = reg2dp_nrdma_disable == 1'h1 ;
-assign erdma_disable = 1'h1 ;
+assign erdma_disable = reg2dp_erdma_disable == 1'h1 ;
 NV_NVDLA_SDP_RDMA_reg u_reg (
    .nvdla_core_clk (nvdla_core_clk) //|< i
   ,.nvdla_core_rstn (nvdla_core_rstn) //|< i
@@ -383,7 +474,17 @@ NV_NVDLA_SDP_RDMA_reg u_reg (
   ,.reg2dp_bs_line_stride (reg2dp_bs_line_stride[31:0]) //|> w
   ,.reg2dp_bs_surface_stride (reg2dp_bs_surface_stride[31:0]) //|> w
   ,.dp2reg_brdma_stall (dp2reg_brdma_stall[31:0]) //|< w
-  ,.dp2reg_erdma_stall (32'h0)
+  ,.reg2dp_erdma_data_mode (reg2dp_erdma_data_mode) //|> w
+  ,.reg2dp_erdma_data_size (reg2dp_erdma_data_size) //|> w
+  ,.reg2dp_erdma_data_use (reg2dp_erdma_data_use[1:0]) //|> w
+  ,.reg2dp_erdma_disable (reg2dp_erdma_disable) //|> w
+  ,.reg2dp_erdma_ram_type (reg2dp_erdma_ram_type) //|> w
+  ,.reg2dp_ew_base_addr_high (reg2dp_ew_base_addr_high[31:0]) //|> w
+  ,.reg2dp_ew_base_addr_low (reg2dp_ew_base_addr_low[31:0]) //|> w
+  ,.reg2dp_ew_batch_stride (reg2dp_ew_batch_stride[31:0]) //|> w 
+  ,.reg2dp_ew_line_stride (reg2dp_ew_line_stride[31:0]) //|> w
+  ,.reg2dp_ew_surface_stride (reg2dp_ew_surface_stride[31:0]) //|> w
+  ,.dp2reg_erdma_stall (dp2reg_erdma_stall[31:0]) //|< w
   ,.reg2dp_op_en (reg2dp_op_en) //|> w
   ,.reg2dp_batch_number (reg2dp_batch_number[4:0]) //|> w
   ,.reg2dp_winograd (reg2dp_winograd) //|> w

@@ -551,7 +551,7 @@ assign ipipe_axi_rdy = 0
 ;
 //:my $k = 7;
 //:my $i;
-//:my @dma_index = (0, 1, 1,1, 1,0, 1, 1, 0, 1,0,0,0,0,0,0);
+//:my @dma_index = (0, 1, 1,1, 1,0, 1, 1, 1, 1,0,0,0,0,0,0);
 //:my @client_id = (0,8,9,3,2,4,1,5,7,6,0,0,0,0,0,0);
 //:my @remap_clientid = (0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 //:my $nindex = 0;
@@ -669,7 +669,7 @@ NV_NVDLA_NOCIF_DRAM_READ_EG_lat_fifo lat_fifo5 (
 ,.rq_rd_pd(rq5_rd_pd)
 ,.pwrbus_ram_pd(pwrbus_ram_pd)
 );
-assign rq6_wr_pvld = ipipe_axi_vld & (ipipe_axi_axid == 6);
+assign rq6_wr_pvld = ipipe_axi_vld & (ipipe_axi_axid == 7);
 wire [64 -1:0] rq6_wr_pd = rq_wr_pd;
 NV_NVDLA_NOCIF_DRAM_READ_EG_lat_fifo lat_fifo6 (
 .nvdla_core_clk(nvdla_core_clk)

@@ -36,6 +36,7 @@
     `define CC_ATOMC_DIV_ATOMK_EQUAL_1
 //image stripe keep 2*atomK
 //batch keep 1
+`define CBUF_WEIGHT_COMPRESSED //whether need read WMB
 module NV_NVDLA_partition_o (
    test_mode
   ,direct_reset_
@@ -51,22 +52,22 @@ module NV_NVDLA_partition_o (
   ,cdma_wt2mcif_rd_req_valid
   ,cdma_wt2mcif_rd_req_ready
   ,cdma_wt2mcif_rd_req_pd
-  ,cmac_a2csb_resp_valid
-  ,cmac_a2csb_resp_pd
-  ,csb2cmac_a_req_pvld
-  ,csb2cmac_a_req_prdy
-  ,csb2cmac_a_req_pd
-  ,cmac_b2csb_resp_valid
-  ,cmac_b2csb_resp_pd
-  ,csb2cmac_b_req_pvld
-  ,csb2cmac_b_req_prdy
-  ,csb2cmac_b_req_pd
-  ,cacc2csb_resp_valid
-  ,cacc2csb_resp_pd
-  ,cacc2glb_done_intr_pd
-  ,csb2cacc_req_pvld
-  ,csb2cacc_req_prdy
-  ,csb2cacc_req_pd
+  ,cmac_a2csb_resp_src_valid
+  ,cmac_a2csb_resp_src_pd
+  ,csb2cmac_a_req_dst_pvld
+  ,csb2cmac_a_req_dst_prdy
+  ,csb2cmac_a_req_dst_pd
+  ,cmac_b2csb_resp_dst_valid
+  ,cmac_b2csb_resp_dst_pd
+  ,csb2cmac_b_req_src_pvld
+  ,csb2cmac_b_req_src_prdy
+  ,csb2cmac_b_req_src_pd
+  ,cacc2csb_resp_dst_valid
+  ,cacc2csb_resp_dst_pd
+  ,cacc2glb_done_intr_dst_pd
+  ,csb2cacc_req_src_pvld
+  ,csb2cacc_req_src_prdy
+  ,csb2cacc_req_src_pd
   ,csb2cdma_req_pvld
   ,csb2cdma_req_prdy
   ,csb2cdma_req_pd
@@ -115,6 +116,13 @@ module NV_NVDLA_partition_o (
   ,sdp_b2mcif_rd_req_valid
   ,sdp_b2mcif_rd_req_ready
   ,sdp_b2mcif_rd_req_pd
+  ,mcif2sdp_e_rd_rsp_valid
+  ,mcif2sdp_e_rd_rsp_ready
+  ,mcif2sdp_e_rd_rsp_pd
+  ,sdp_e2mcif_rd_cdt_lat_fifo_pop
+  ,sdp_e2mcif_rd_req_valid
+  ,sdp_e2mcif_rd_req_ready
+  ,sdp_e2mcif_rd_req_pd
   ,mcif2sdp_n_rd_rsp_valid
   ,mcif2sdp_n_rd_rsp_ready
   ,mcif2sdp_n_rd_rsp_pd
@@ -139,6 +147,27 @@ module NV_NVDLA_partition_o (
   ,nvdla2csb_wr_complete
   ,core_intr
   ,pwrbus_ram_pd
+  ,sc2mac_dat_a_dst_pvld
+  ,sc2mac_dat_a_dst_mask
+//: my $kk=8 -1;
+//: foreach my $i (0..${kk}) {
+//: print qq(
+//: ,sc2mac_dat_a_dst_data$i
+//: ,sc2mac_dat_a_src_data$i
+//: ,sc2mac_wt_a_dst_data$i
+//: ,sc2mac_wt_a_src_data$i
+//: );
+//: }
+  ,sc2mac_dat_a_dst_pd
+  ,sc2mac_dat_a_src_pvld
+  ,sc2mac_dat_a_src_mask
+  ,sc2mac_dat_a_src_pd
+  ,sc2mac_wt_a_dst_pvld
+  ,sc2mac_wt_a_dst_mask
+  ,sc2mac_wt_a_dst_sel
+  ,sc2mac_wt_a_src_pvld
+  ,sc2mac_wt_a_src_mask
+  ,sc2mac_wt_a_src_sel
   ,sdp2csb_resp_valid
   ,sdp2csb_resp_pd
   ,sdp2glb_done_intr_pd
@@ -172,22 +201,22 @@ input cdma2csb_resp_valid; /* data valid */
 input [33:0] cdma2csb_resp_pd; /* pkt_id_width=1 pkt_widths=33,33  */
 input [1:0] cdma_dat2glb_done_intr_pd;
 input [1:0] cdma_wt2glb_done_intr_pd;
-input cmac_a2csb_resp_valid; /* data valid */
-input [33:0] cmac_a2csb_resp_pd; /* pkt_id_width=1 pkt_widths=33,33  */
-output csb2cmac_a_req_pvld; /* data valid */
-input csb2cmac_a_req_prdy; /* data return handshake */
-output [62:0] csb2cmac_a_req_pd;
-input cmac_b2csb_resp_valid; /* data valid */
-input [33:0] cmac_b2csb_resp_pd; /* pkt_id_width=1 pkt_widths=33,33  */
-output csb2cmac_b_req_pvld; /* data valid */
-input csb2cmac_b_req_prdy; /* data return handshake */
-output [62:0] csb2cmac_b_req_pd;
-input cacc2csb_resp_valid; /* data valid */
-input [33:0] cacc2csb_resp_pd; /* pkt_id_width=1 pkt_widths=33,33  */
-input [1:0] cacc2glb_done_intr_pd;
-output csb2cacc_req_pvld; /* data valid */
-input csb2cacc_req_prdy; /* data return handshake */
-output [62:0] csb2cacc_req_pd;
+input cmac_a2csb_resp_src_valid; /* data valid */
+input [33:0] cmac_a2csb_resp_src_pd; /* pkt_id_width=1 pkt_widths=33,33  */
+output csb2cmac_a_req_dst_pvld; /* data valid */
+input csb2cmac_a_req_dst_prdy; /* data return handshake */
+output [62:0] csb2cmac_a_req_dst_pd;
+input cmac_b2csb_resp_dst_valid; /* data valid */
+input [33:0] cmac_b2csb_resp_dst_pd; /* pkt_id_width=1 pkt_widths=33,33  */
+output csb2cmac_b_req_src_pvld; /* data valid */
+input csb2cmac_b_req_src_prdy; /* data return handshake */
+output [62:0] csb2cmac_b_req_src_pd;
+input cacc2csb_resp_dst_valid; /* data valid */
+input [33:0] cacc2csb_resp_dst_pd; /* pkt_id_width=1 pkt_widths=33,33  */
+input [1:0] cacc2glb_done_intr_dst_pd;
+output csb2cacc_req_src_pvld; /* data valid */
+input csb2cacc_req_src_prdy; /* data return handshake */
+output [62:0] csb2cacc_req_src_pd;
 output csb2cdma_req_pvld; /* data valid */
 input csb2cdma_req_prdy; /* data return handshake */
 output [62:0] csb2cdma_req_pd;
@@ -250,6 +279,13 @@ input sdp_b2mcif_rd_cdt_lat_fifo_pop;
 input sdp_b2mcif_rd_req_valid;
 output sdp_b2mcif_rd_req_ready;
 input [32 +14:0] sdp_b2mcif_rd_req_pd;
+output mcif2sdp_e_rd_rsp_valid;
+input mcif2sdp_e_rd_rsp_ready;
+output [64 +(64/8/8)-1:0] mcif2sdp_e_rd_rsp_pd;
+input sdp_e2mcif_rd_cdt_lat_fifo_pop;
+input sdp_e2mcif_rd_req_valid;
+output sdp_e2mcif_rd_req_ready;
+input [32 +14:0] sdp_e2mcif_rd_req_pd;
 output mcif2sdp_n_rd_rsp_valid;
 input mcif2sdp_n_rd_rsp_ready;
 output [64 +(64/8/8)-1:0] mcif2sdp_n_rd_rsp_pd;
@@ -273,6 +309,27 @@ output [31:0] nvdla2csb_data;
 output nvdla2csb_wr_complete;
 output core_intr;
 input [31:0] pwrbus_ram_pd;
+//: my $kk=8 -1;
+//: foreach my $i (0..${kk}) {
+//: print qq(
+//: output [8 -1:0] sc2mac_dat_a_dst_data${i};
+//: input [8 -1:0] sc2mac_dat_a_src_data${i};
+//: output [8 -1:0] sc2mac_wt_a_dst_data${i};
+//: input [8 -1:0] sc2mac_wt_a_src_data${i};
+//: );
+//: }
+output sc2mac_dat_a_dst_pvld;
+output [8 -1:0] sc2mac_dat_a_dst_mask;
+output [8:0] sc2mac_dat_a_dst_pd;
+input sc2mac_dat_a_src_pvld;
+input [8 -1:0] sc2mac_dat_a_src_mask;
+input [8:0] sc2mac_dat_a_src_pd;
+output sc2mac_wt_a_dst_pvld;
+output [8 -1:0] sc2mac_wt_a_dst_mask;
+output [8/2 -1:0] sc2mac_wt_a_dst_sel;
+input sc2mac_wt_a_src_pvld;
+input [8 -1:0] sc2mac_wt_a_src_mask;
+input [8/2 -1:0] sc2mac_wt_a_src_sel;
 input sdp2csb_resp_valid; /* data valid */
 input [33:0] sdp2csb_resp_pd; /* pkt_id_width=1 pkt_widths=33,33  */
 input [1:0] sdp2glb_done_intr_pd;
@@ -332,6 +389,8 @@ wire cdp2mcif_wr_req_ready;
 wire cdp2mcif_wr_req_valid;
 wire [33:0] cdp_rdma2csb_resp_pd;
 wire cdp_rdma2csb_resp_valid;
+wire [33:0] cmac_a2csb_resp_dst_pd;
+wire cmac_a2csb_resp_dst_valid;
 wire [62:0] csb2bdma_req_pd;
 wire csb2bdma_req_prdy;
 wire csb2bdma_req_pvld;
@@ -341,6 +400,9 @@ wire csb2cdp_rdma_req_pvld;
 wire [62:0] csb2cdp_req_pd;
 wire csb2cdp_req_prdy;
 wire csb2cdp_req_pvld;
+wire [62:0] csb2cmac_a_req_src_pd;
+wire csb2cmac_a_req_src_prdy;
+wire csb2cmac_a_req_src_pvld;
 wire [62:0] csb2glb_req_pd;
 wire csb2glb_req_prdy;
 wire csb2glb_req_pvld;
@@ -491,21 +553,21 @@ NV_NVDLA_csb_master u_NV_NVDLA_csb_master (
   ,.csb2csc_req_pd (csb2csc_req_pd)
   ,.csc2csb_resp_valid (csc2csb_resp_valid)
   ,.csc2csb_resp_pd (csc2csb_resp_pd)
-  ,.csb2cmac_a_req_pvld (csb2cmac_a_req_pvld)
-  ,.csb2cmac_a_req_prdy (csb2cmac_a_req_prdy)
-  ,.csb2cmac_a_req_pd (csb2cmac_a_req_pd)
-  ,.cmac_a2csb_resp_valid (cmac_a2csb_resp_valid)
-  ,.cmac_a2csb_resp_pd (cmac_a2csb_resp_pd)
-  ,.csb2cmac_b_req_pvld (csb2cmac_b_req_pvld)
-  ,.csb2cmac_b_req_prdy (csb2cmac_b_req_prdy)
-  ,.csb2cmac_b_req_pd (csb2cmac_b_req_pd)
-  ,.cmac_b2csb_resp_valid (cmac_b2csb_resp_valid)
-  ,.cmac_b2csb_resp_pd (cmac_b2csb_resp_pd)
-  ,.csb2cacc_req_pvld (csb2cacc_req_pvld)
-  ,.csb2cacc_req_prdy (csb2cacc_req_prdy)
-  ,.csb2cacc_req_pd (csb2cacc_req_pd)
-  ,.cacc2csb_resp_valid (cacc2csb_resp_valid)
-  ,.cacc2csb_resp_pd (cacc2csb_resp_pd)
+  ,.csb2cmac_a_req_pvld (csb2cmac_a_req_src_pvld)
+  ,.csb2cmac_a_req_prdy (csb2cmac_a_req_src_prdy)
+  ,.csb2cmac_a_req_pd (csb2cmac_a_req_src_pd)
+  ,.cmac_a2csb_resp_valid (cmac_a2csb_resp_dst_valid)
+  ,.cmac_a2csb_resp_pd (cmac_a2csb_resp_dst_pd)
+  ,.csb2cmac_b_req_pvld (csb2cmac_b_req_src_pvld)
+  ,.csb2cmac_b_req_prdy (csb2cmac_b_req_src_prdy)
+  ,.csb2cmac_b_req_pd (csb2cmac_b_req_src_pd)
+  ,.cmac_b2csb_resp_valid (cmac_b2csb_resp_dst_valid)
+  ,.cmac_b2csb_resp_pd (cmac_b2csb_resp_dst_pd)
+  ,.csb2cacc_req_pvld (csb2cacc_req_src_pvld)
+  ,.csb2cacc_req_prdy (csb2cacc_req_src_prdy)
+  ,.csb2cacc_req_pd (csb2cacc_req_src_pd)
+  ,.cacc2csb_resp_valid (cacc2csb_resp_dst_valid)
+  ,.cacc2csb_resp_pd (cacc2csb_resp_dst_pd)
   ,.csb2sdp_rdma_req_pvld (csb2sdp_rdma_req_pvld)
   ,.csb2sdp_rdma_req_prdy (csb2sdp_rdma_req_prdy)
   ,.csb2sdp_rdma_req_pd (csb2sdp_rdma_req_pd)
@@ -546,7 +608,7 @@ NV_NVDLA_csb_master u_NV_NVDLA_csb_master (
 ////////////////////////////////////////////////////////////////////////
 //:my $i;
 //:my $nindex=0;
-//: my @dma_index = (0, 1, 1,1, 1,0, 1, 1, 0, 1,0,0,0,0,0,0);
+//: my @dma_index = (0, 1, 1,1, 1,0, 1, 1, 1, 1,0,0,0,0,0,0);
 //: my @dma_name = ("bdma","cdma_dat","cdma_wt","cdp","pdp","rbk","sdp","sdp_b","sdp_e","sdp_n");
 //: my @lat_fifo_depth = (245,0,0,61,61,80,80,160,80,160,0,0,0,0,0,0);
 //: for ($i=0;$i<16;$i++) {
@@ -571,7 +633,7 @@ NV_NVDLA_NOCIF_dram u_NV_NVDLA_mcif (
   ,.nvdla_core_rstn (nvdla_core_rstn) //|< o
 //:my $i;
 //:my $nindex=0;
-//: my @dma_index = (0, 1, 1,1, 1,0, 1, 1, 0, 1,0,0,0,0,0,0);
+//: my @dma_index = (0, 1, 1,1, 1,0, 1, 1, 1, 1,0,0,0,0,0,0);
 //: my @dma_name = ("bdma","cdma_dat","cdma_wt","cdp","pdp","rbk","sdp","sdp_b","sdp_e","sdp_n");
 //: my @client_id = (0, 8, 9, 3, 2, 4, 1, 5, 7, 6,0,0,0,0,0,0,0);
 //: my @lat_fifo_depth = (245,0,0,61,61,80,80,160,80,160,0,0,0,0,0,0);
@@ -738,13 +800,65 @@ NV_NVDLA_glb u_NV_NVDLA_glb (
   ,.pdp2glb_done_intr_pd (pdp2glb_done_intr_pd[1:0]) //|< w
   ,.cdma_wt2glb_done_intr_pd (cdma_wt2glb_done_intr_pd[1:0]) //|< i
   ,.cdma_dat2glb_done_intr_pd (cdma_dat2glb_done_intr_pd[1:0]) //|< i
-  ,.cacc2glb_done_intr_pd (cacc2glb_done_intr_pd[1:0]) //|< i
+  ,.cacc2glb_done_intr_pd (cacc2glb_done_intr_dst_pd[1:0]) //|< i
   ,.nvdla_core_clk (nvdla_core_clk) //|< i
   ,.nvdla_falcon_clk (nvdla_falcon_clk) //|< i
   ,.nvdla_core_rstn (nvdla_core_rstn) //|< o
   ,.nvdla_falcon_rstn (nvdla_falcon_rstn) //|< w
   ,.test_mode (test_mode) //|< i
   ,.direct_reset_ (direct_reset_) //|< i
+  );
+////////////////////////////////////////////////////////////////////////
+// NVDLA Partition O: Retiming path csc->cmac_a //
+////////////////////////////////////////////////////////////////////////
+NV_NVDLA_RT_csc2cmac_a u_NV_NVDLA_RT_csc2cmac_a (
+   .nvdla_core_clk (nvdla_core_clk) //|< i
+  ,.nvdla_core_rstn (nvdla_core_rstn) //|< o
+  ,.sc2mac_wt_src_pvld (sc2mac_wt_a_src_pvld) //|< i
+  ,.sc2mac_wt_src_mask (sc2mac_wt_a_src_mask[8 -1:0]) //|< i
+//: my $bb=8;
+//: for(my $i=0; $i<8; $i++){
+//: print ",.sc2mac_wt_src_data${i}            (sc2mac_wt_a_src_data${i}[${bb}-1:0])  \n";
+//: }
+  ,.sc2mac_wt_src_sel (sc2mac_wt_a_src_sel[8/2 -1:0]) //|< i
+  ,.sc2mac_dat_src_pvld (sc2mac_dat_a_src_pvld) //|< i
+  ,.sc2mac_dat_src_mask (sc2mac_dat_a_src_mask[8 -1:0]) //|< i
+//: my $bb=8;
+//: for(my $i=0; $i<8; $i++){
+//: print ",.sc2mac_dat_src_data${i}            (sc2mac_dat_a_src_data${i}[${bb}-1:0])  \n";
+//: }
+  ,.sc2mac_dat_src_pd (sc2mac_dat_a_src_pd[8:0]) //|< i
+  ,.sc2mac_wt_dst_pvld (sc2mac_wt_a_dst_pvld) //|> o
+  ,.sc2mac_wt_dst_mask (sc2mac_wt_a_dst_mask[8 -1:0]) //|> o
+//: my $bb=8;
+//: for(my $i=0; $i<8; $i++){
+//: print ",.sc2mac_wt_dst_data${i}            (sc2mac_wt_a_dst_data${i}[${bb}-1:0])  \n";
+//: }
+  ,.sc2mac_wt_dst_sel (sc2mac_wt_a_dst_sel[8/2 -1:0]) //|> o
+  ,.sc2mac_dat_dst_pvld (sc2mac_dat_a_dst_pvld) //|> o
+  ,.sc2mac_dat_dst_mask (sc2mac_dat_a_dst_mask[8 -1:0]) //|> o
+//: my $bb=8;
+//: for(my $i=0; $i<8; $i++){
+//: print ",.sc2mac_dat_dst_data${i}            (sc2mac_dat_a_dst_data${i}[${bb}-1:0])  \n";
+//: }
+  ,.sc2mac_dat_dst_pd (sc2mac_dat_a_dst_pd[8:0]) //|> o
+  );
+////////////////////////////////////////////////////////////////////////
+// NVDLA Partition O: Retiming path csb<->cmac_a //
+////////////////////////////////////////////////////////////////////////
+NV_NVDLA_RT_csb2cmac u_NV_NVDLA_RT_csb2cmac (
+   .nvdla_core_clk (nvdla_core_clk) //|< i
+  ,.nvdla_core_rstn (nvdla_core_rstn) //|< o
+  ,.csb2cmac_req_src_pvld (csb2cmac_a_req_src_pvld) //|< w
+  ,.csb2cmac_req_src_prdy (csb2cmac_a_req_src_prdy) //|> w
+  ,.csb2cmac_req_src_pd (csb2cmac_a_req_src_pd[62:0]) //|< w
+  ,.cmac2csb_resp_src_valid (cmac_a2csb_resp_src_valid) //|< i
+  ,.cmac2csb_resp_src_pd (cmac_a2csb_resp_src_pd[33:0]) //|< i
+  ,.csb2cmac_req_dst_pvld (csb2cmac_a_req_dst_pvld) //|> o
+  ,.csb2cmac_req_dst_prdy (csb2cmac_a_req_dst_prdy) //|< i
+  ,.csb2cmac_req_dst_pd (csb2cmac_a_req_dst_pd[62:0]) //|> o
+  ,.cmac2csb_resp_dst_valid (cmac_a2csb_resp_dst_valid) //|> w
+  ,.cmac2csb_resp_dst_pd (cmac_a2csb_resp_dst_pd[33:0]) //|> w
   );
 ////////////////////////////////////////////////////////////////////////
 // Dangles/Contenders report //

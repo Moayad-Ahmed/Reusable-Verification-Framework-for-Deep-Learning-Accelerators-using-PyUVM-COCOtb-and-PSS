@@ -667,3 +667,168 @@ class CdpTestSequence(NVDLASequenceBase):
             # ---- Wait for scoreboard to confirm check complete ----
             await bfm.iteration_done_queue.get()
             print(f"CDP iteration {i} checked by scoreboard.")
+
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  SDP ACTIVATION SUB-SEQUENCES
+# ══════════════════════════════════════════════════════════════════════
+
+class SdpDataSubSequence(uvm_sequence):
+    """Sends one DataTransaction to the DataAgent sequencer."""
+
+    def __init__(self, name, data_tx):
+        super().__init__(name)
+        self.data_tx = data_tx
+
+    async def body(self):
+        await self.start_item(self.data_tx)
+        await self.finish_item(self.data_tx)
+
+
+class SdpCsbSubSequence(uvm_sequence):
+    """Sends one CsbTransaction to the CsbAgent sequencer."""
+
+    def __init__(self, name, csb_tx):
+        super().__init__(name)
+        self.csb_tx = csb_tx
+
+    async def body(self):
+        await self.start_item(self.csb_tx)
+        await self.finish_item(self.csb_tx)
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  SDP ACTIVATION VIRTUAL SEQUENCE
+# ══════════════════════════════════════════════════════════════════════
+
+class SdpTestSequence(NVDLASequenceBase):
+    """
+    Virtual sequence for NVDLA SDP activation (standalone, non-flying) tests.
+
+    Pipeline: SDP_RDMA → SDP[activation] → WDMA → DRAM
+
+    Each iteration:
+        1. Generates random input and computes golden activation output
+        2. Writes atom-padded HWC hex file to disk
+        3. Sends DataTransaction → DataAgent  (loads DRAM)
+        4. Sends CsbTransaction  → CsbAgent   (programs SDP_RDMA + SDP regs)
+        5. Waits for scoreboard to signal iteration complete
+    """
+
+    BPE        = 1     # INT8 only
+    ITERATIONS = 5
+
+    def __init__(self, name, input_file=None, config_file=None):
+        super().__init__(name)
+        self.input_file  = input_file
+        self.config_file = config_file
+
+    def _input_to_hwc_bytes(self, input_data, channels):
+        """
+        Convert input array to flat HWC byte list, atom-padded per pixel.
+
+        Args:
+            input_data: np.int8 (H, W) or (C, H, W)
+            channels: number of channels
+
+        Returns:
+            (byte_list, pixel_bytes) tuple
+        """
+        atoms       = max(1, (channels * self.BPE + self.ATOM - 1) // self.ATOM)
+        pixel_bytes = atoms * self.ATOM
+
+        if input_data.ndim == 2:
+            h, w = input_data.shape
+            buf = []
+            for r in range(h):
+                for c in range(w):
+                    buf.append(int(input_data[r, c]) & 0xFF)
+                    buf.extend([0] * (pixel_bytes - self.BPE))
+        else:
+            ch, h, w = input_data.shape
+            buf = []
+            for r in range(h):
+                for c_idx in range(w):
+                    for ch_idx in range(ch):
+                        buf.append(int(input_data[ch_idx, r, c_idx]) & 0xFF)
+                    buf.extend([0] * (pixel_bytes - ch * self.BPE))
+
+        return buf, pixel_bytes
+
+    def _expected_to_hwc_bytes(self, output_data, channels):
+        """Convert output array to flat HWC unsigned byte list."""
+        if output_data.ndim == 2:
+            return [int(v) & 0xFF for v in output_data.flatten()]
+        else:
+            # (C, H, W) → HWC flat
+            _, h, w = output_data.shape
+            result = []
+            for r in range(h):
+                for c_idx in range(w):
+                    for ch_idx in range(channels):
+                        result.append(int(output_data[ch_idx, r, c_idx]) & 0xFF)
+            return result
+
+    async def body(self):
+        strategy = LayerFactory.create_strategy('activation')
+        reg_cfg  = RegistrationConfigs()
+        config   = self.load_yaml_config()
+        bfm      = NvdlaBFM()
+
+        # ---- Extract dimensions ----
+        input_shape = config['input_shape']
+        if len(input_shape) == 3:
+            in_h, in_w, channels = input_shape
+        else:
+            in_h, in_w = input_shape
+            channels = 1
+
+        # ---- Memory layout ----
+        atoms_per_pixel = max(1, (channels * self.BPE + self.ATOM - 1) // self.ATOM)
+        pixel_bytes     = atoms_per_pixel * self.ATOM
+        input_total     = in_h * in_w * pixel_bytes
+        output_base     = self.align_to_256(input_total)
+
+        # Output shape == input shape for activation
+        out_h, out_w = in_h, in_w
+
+        for i in range(self.ITERATIONS):
+            # ---- Generate stimulus & golden ----
+            input_data = strategy.generate_input_data(config)
+            expected   = strategy.compute_golden(input_data, config)
+
+            # ---- Write input hex file ----
+            input_bytes, _ = self._input_to_hwc_bytes(input_data, channels)
+            self.write_hex_file(self.input_file, input_bytes)
+
+            # ---- Expected output in HWC flat unsigned bytes ----
+            expected_list = self._expected_to_hwc_bytes(expected, channels)
+
+            # ---- Build DataTransaction ----
+            data_tx = DataTransaction(f"sdp_data_tx_{i}", strategy)
+            data_tx.input_file      = self.input_file
+            data_tx.input_base_addr = 0
+            # No weight file for activation
+
+            # ---- Build CsbTransaction ----
+            csb_tx = CsbTransaction(f"sdp_csb_tx_{i}", strategy)
+            csb_tx.reg_configs = reg_cfg.activation_configs(
+                config, src_addr=0, dst_addr=output_base
+            )
+            csb_tx.output_base_addr            = output_base
+            csb_tx.output_num_pixels           = out_h * out_w
+            csb_tx.output_pixel_bytes          = pixel_bytes
+            csb_tx.output_data_bytes_per_pixel = channels * self.BPE
+            csb_tx.expected_output_data        = expected_list
+
+            # ---- Dispatch: data first, then CSB ----
+            data_sub = SdpDataSubSequence(f"sdp_data_sub_{i}", data_tx)
+            await data_sub.start(self.sequencer.data_sqr)
+
+            csb_sub = SdpCsbSubSequence(f"sdp_csb_sub_{i}", csb_tx)
+            await csb_sub.start(self.sequencer.csb_sqr)
+
+            # ---- Wait for scoreboard to confirm check complete ----
+            await bfm.iteration_done_queue.get()
+            print(f"SDP activation iteration {i} checked by scoreboard.")

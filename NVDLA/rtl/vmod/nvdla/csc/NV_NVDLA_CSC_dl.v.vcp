@@ -26,6 +26,7 @@
     `define CC_ATOMC_DIV_ATOMK_EQUAL_1
 //image stripe keep 2*atomK
 //batch keep 1
+`define CBUF_WEIGHT_COMPRESSED //whether need read WMB
 // ================================================================
 // NVDLA Open Source Project
 // 
@@ -36,6 +37,7 @@
 // File Name: NV_NVDLA_CBUF.h
     `define CBUF_BANK_RAM_CASE2
 //ram case could be 0/1/2/3/4  0:1ram/bank; 1:1*2ram/bank; 2:2*1ram/bank; 3:2*2ram/bank  4:4*1ram/bank
+    `define CBUF_WEIGHT_COMPRESSED //whether need read WMB
 `define CDMA2CBUF_DEBUG_PRINT //open debug print
 module NV_NVDLA_CSC_dl (
    nvdla_core_clk //|< i
@@ -802,7 +804,7 @@ assign is_sg_done = (sc_state == 3 );
 //////////////////////////////////////////////////////////////
 assign layer_st = reg2dp_op_en & is_sg_idle;
 assign is_pixel = (reg2dp_datain_format == 1'h1 );
-`ifdef NVDLA_WINOGRAD_ENABLE
+`ifdef
 assign is_winograd = (reg2dp_conv_mode == 1'h1 );
 `else
 assign is_winograd = 1'b0;
@@ -1562,7 +1564,7 @@ assign rsp_sft_cnt_l3_ori_en = layer_st | (is_img_d1[24] & dat_rsp_l3_pvld & dat
 //////////////////////////////////////////////////////////////
 //////////////// data for winograd ////////////////
 //winograd need future update
-`ifdef NVDLA_WINOGRAD_ENABLE
+`ifdef
 //6x6x8byte matrix
 assign dat_wg = ~is_winograd_d1[12] ? 2304'b0 :
                 {dat_l1c0[511:256], dat_l1c1[511:384],
@@ -1746,7 +1748,7 @@ assign dat_out_bypass_data_w = dat_rsp_data_w;
 //: &eperl::flop("-nodeclare  -norst -en \"dat_out_bypass_p0_vld_w & dat_out_bypass_mask_w[${i}]\" -d \"dat_out_bypass_data_w[${b1}:${b0}]\" -q dat_out_bypass_data[${b1}:${b0}]");
 //: }
 //:
-`ifdef NVDLA_WINOGRAD_ENABLE
+`ifdef
 //////////////////////////////////////////////////////////////
 ///// PRA units instance                                 /////
 //////////////////////////////////////////////////////////////

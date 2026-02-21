@@ -72,9 +72,11 @@ input [31-3:0] reg2dp_dst_surface_stride;
 input [1:0] reg2dp_ew_alu_algo;
 input reg2dp_ew_alu_bypass;
 input reg2dp_ew_bypass;
+reg [32 -3 -1:0] base_addr_winog;
 reg [32 -3 -1:0] base_addr_line;
 reg [32 -3 -1:0] base_addr_surf;
 reg [32 -3 -1:0] base_addr_width;
+reg mon_base_addr_winog_c;
 reg mon_base_addr_line_c;
 reg mon_base_addr_surf_c;
 reg mon_base_addr_width_c;
@@ -96,6 +98,8 @@ wire cfg_mode_eql;
 wire cfg_mode_norml;
 wire cfg_mode_pdp;
 wire cfg_mode_quite;
+reg [1:0] count_wg;
+wire [1:0] size_of_wg;
 reg [13-3:0] count_c;
 reg [12:0] count_h;
 reg [13:0] count_w;
@@ -126,6 +130,13 @@ wire [13-3:0] mode_1x1_dma_size;
 wire [13-3:0] mode_1x1_spt_size;
 wire is_ftrans;
 wire is_ltrans;
+reg [2:0] mode_winog_size_of_trans;
+wire mode_winog_dma_size;
+wire [2:0] mode_winog_size_of_ftrans;
+wire [2:0] mode_winog_size_of_ltrans;
+wire [2:0] mode_winog_size_of_mtrans;
+wire [11:0] mode_winog_size_of_reqs;
+wire [1:0] mode_winog_spt_size;
 wire [12:0] mode_norml_dma_size;
 wire [13:0] mode_norml_spt_size;
 wire [14:0] spt_fifo_pd;
@@ -136,7 +147,7 @@ assign cfg_dst_addr = reg2dp_dst_base_addr_low;
 assign cfg_dst_surf_stride = {reg2dp_dst_surface_stride};
 assign cfg_dst_line_stride = {reg2dp_dst_line_stride};
 assign cfg_mode_batch = 1'b0;
-assign cfg_mode_winog = 1'b0 ;
+assign cfg_mode_winog = reg2dp_winograd== 1'h1 ;
 assign cfg_di_int8 = reg2dp_proc_precision == 0 ;
 assign cfg_di_int16 = reg2dp_proc_precision == 1 ;
 assign cfg_do_int8 = reg2dp_out_precision == 0 ;
@@ -183,13 +194,55 @@ wire is_beg_addr_odd = beg_addr_offset[0]==1'b1;
 wire [3:0] end_addr_offset = beg_addr_offset + reg2dp_width[2:0];
 wire is_end_addr_odd = end_addr_offset[0]==1'b0;
 wire odd = ((is_ftrans & is_beg_addr_odd) || (is_ltrans && is_end_addr_odd));
+// winog
+assign mode_winog_size_of_ftrans = 3'd1;
+assign mode_winog_size_of_mtrans = 3'd1;
+assign mode_winog_size_of_ltrans = 3'd1;
+assign mode_winog_size_of_reqs[11:0] = reg2dp_width[12:1];
 //================================
 // SIZE of Trans
 //================================
-assign is_last_wg = 1'b1;
+always @(
+  is_ftrans
+  or mode_winog_size_of_ftrans
+  or is_ltrans
+  or mode_winog_size_of_ltrans
+  or mode_winog_size_of_mtrans
+  ) begin
+   if (is_ftrans) begin
+       mode_winog_size_of_trans = mode_winog_size_of_ftrans;
+   end else if (is_ltrans) begin
+       mode_winog_size_of_trans = mode_winog_size_of_ltrans;
+   end else begin
+       mode_winog_size_of_trans = mode_winog_size_of_mtrans;
+   end
+end
+// COUNT WG
+assign size_of_wg = cfg_mode_winog ? 2'd3 : 2'd0;
+always @(posedge nvdla_core_clk or negedge nvdla_core_rstn) begin
+  if (!nvdla_core_rstn) begin
+    count_wg <= {2{1'b0}};
+  end else begin
+    if (cfg_mode_winog) begin
+        if (cmd_accept) begin
+            if (is_last_wg) begin
+                count_wg <= 0;
+            end else begin
+                count_wg <= count_wg + 1'b1;
+            end
+        end
+    end
+  end
+end
+assign is_last_wg = count_wg==size_of_wg;
 always @(
   reg2dp_width
+  or cfg_mode_winog
+  or mode_winog_size_of_reqs
   ) begin
+    if (cfg_mode_winog)
+        size_of_width = {2'b0, mode_winog_size_of_reqs};
+    else
         size_of_width = {1'b0, reg2dp_width};
 end
 always @(posedge nvdla_core_clk or negedge nvdla_core_rstn) begin
@@ -212,7 +265,7 @@ assign is_last_e = 1'b1;
 //==============
 // HEIGHT Count:
 //==============
-assign size_of_height = reg2dp_height;
+assign size_of_height = cfg_mode_winog ? reg2dp_height>>2 : reg2dp_height;
 always @(posedge nvdla_core_clk or negedge nvdla_core_rstn) begin
   if (!nvdla_core_rstn) begin
     count_h <= {13{1'b0}};
@@ -252,6 +305,28 @@ assign is_last_batch = 1'b1;
 //==========================================
 // DMA Req : ADDR PREPARE
 //==========================================
+// WINOG
+always @(posedge nvdla_core_clk or negedge nvdla_core_rstn) begin
+  if (!nvdla_core_rstn) begin
+    {mon_base_addr_winog_c,base_addr_winog} <= {(32 -3 +1){1'b0}};
+  end else begin
+    if (cfg_mode_winog & cfg_addr_en) begin
+        if (op_load) begin
+            {mon_base_addr_winog_c,base_addr_winog} <= {1'b0,cfg_dst_addr};
+        end else if (cmd_accept) begin
+            if (is_surf_end) begin
+                {mon_base_addr_winog_c,base_addr_winog} <= base_addr_surf + cfg_dst_surf_stride;
+            end else if (is_line_end) begin
+                {mon_base_addr_winog_c,base_addr_winog} <= base_addr_line + (cfg_dst_line_stride<<2);
+            end else if (is_winog_end) begin
+                {mon_base_addr_winog_c,base_addr_winog} <= base_addr_width + (mode_winog_size_of_trans+1);
+            end else begin
+                {mon_base_addr_winog_c,base_addr_winog} <= base_addr_winog + cfg_dst_line_stride;
+            end
+        end
+    end
+  end
+end
 // WIDTH
 always @(posedge nvdla_core_clk or negedge nvdla_core_rstn) begin
   if (!nvdla_core_rstn) begin
@@ -261,6 +336,15 @@ always @(posedge nvdla_core_clk or negedge nvdla_core_rstn) begin
         if (op_load) begin
             {mon_base_addr_width_c,base_addr_width} <= {1'b0,cfg_dst_addr};
         end else if (cmd_accept) begin
+            if (cfg_mode_winog ) begin
+                if (is_surf_end) begin
+                    {mon_base_addr_width_c,base_addr_width} <= base_addr_surf + cfg_dst_surf_stride;
+                end else if (is_line_end) begin
+                    {mon_base_addr_width_c,base_addr_width} <= base_addr_line + (cfg_dst_line_stride<<2);
+                end else if (is_winog_end) begin
+                    {mon_base_addr_width_c,base_addr_width} <= base_addr_width + (mode_winog_size_of_trans+1);
+                end
+            end else
             begin
                 if (is_surf_end) begin
                     {mon_base_addr_width_c,base_addr_width} <= base_addr_surf + cfg_dst_surf_stride;
@@ -281,6 +365,13 @@ always @(posedge nvdla_core_clk or negedge nvdla_core_rstn) begin
         if (op_load) begin
             {mon_base_addr_line_c,base_addr_line} <= {1'b0,cfg_dst_addr};
         end else if (cmd_accept) begin
+            if (cfg_mode_winog) begin
+                if (is_surf_end) begin
+                    {mon_base_addr_line_c,base_addr_line} <= base_addr_surf + cfg_dst_surf_stride;
+                end else if (is_line_end) begin
+                    {mon_base_addr_line_c,base_addr_line} <= base_addr_line + (cfg_dst_line_stride<<2);
+                end
+            end else
             begin
                 if (is_surf_end) begin
                     {mon_base_addr_line_c,base_addr_line} <= base_addr_surf + cfg_dst_surf_stride;
@@ -301,6 +392,11 @@ always @(posedge nvdla_core_clk or negedge nvdla_core_rstn) begin
         if (op_load) begin
             {mon_base_addr_surf_c,base_addr_surf} <= {1'b0,cfg_dst_addr};
         end else if (cmd_accept) begin
+            if (cfg_mode_winog) begin
+                if (is_surf_end) begin
+                    {mon_base_addr_surf_c,base_addr_surf} <= base_addr_surf + cfg_dst_surf_stride;
+                end
+            end else
             begin
                 if (is_surf_end) begin
                     {mon_base_addr_surf_c,base_addr_surf} <= base_addr_surf + cfg_dst_surf_stride;
@@ -315,7 +411,12 @@ end
 //==========================================
 always @(
   base_addr_line
+  or cfg_mode_winog
+  or base_addr_winog
   ) begin
+    if (cfg_mode_winog) begin
+        dma_addr = base_addr_winog;
+    end else
     begin
         dma_addr = base_addr_line;
     end
@@ -325,30 +426,40 @@ end
 //========================
 // spt_size is to tell how many data from dp2wdma for a corresponding DMA req to MC/CF if
 // spt_size is in unit of cycle on dp2wdma
+assign mode_winog_spt_size[1:0] = 2'd1;
 assign mode_1x1_spt_size = (cfg_do_int8 | cfg_di_int8) ? {1'b0,reg2dp_channel[12:3]} : reg2dp_channel[12:3 -1];
 assign mode_norml_spt_size[13:0] = {1'b0,reg2dp_width};
 always @(
   cfg_mode_1x1_nbatch
   or mode_1x1_spt_size
+  or cfg_mode_winog
+  or mode_winog_spt_size
   or mode_norml_spt_size
   ) begin
     if (cfg_mode_1x1_nbatch)
         spt_size = {{3{1'b0}}, mode_1x1_spt_size};
+    else if (cfg_mode_winog)
+        spt_size = {{12{1'b0}}, mode_winog_spt_size};
     else
         spt_size = mode_norml_spt_size;
 end
 //========================
 // Output: one for data write spt_; and one for data read dma_
 //========================
+assign mode_winog_dma_size = 1'd1;
 assign mode_1x1_dma_size = size_of_surf;
 assign mode_norml_dma_size = reg2dp_width;
 always @(
   cfg_mode_1x1_nbatch
   or mode_1x1_dma_size
+  or cfg_mode_winog
+  or mode_winog_dma_size
   or mode_norml_dma_size
   ) begin
     if (cfg_mode_1x1_nbatch)
         dma_size = {{3 -1{1'b0}}, mode_1x1_dma_size};
+    else if (cfg_mode_winog)
+        dma_size = {{12{1'b0}}, mode_winog_dma_size};
     else
         dma_size = mode_norml_dma_size;
 end

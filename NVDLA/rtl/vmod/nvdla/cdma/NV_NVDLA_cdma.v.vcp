@@ -378,12 +378,16 @@ wire mcif2dc_dat_rd_rsp_valid;
 wire [( 64 + (64/8/8) )-1:0] mcif2img_dat_rd_rsp_pd;
 wire mcif2img_dat_rd_rsp_ready;
 wire mcif2img_dat_rd_rsp_valid;
+wire [( 64 + (64/8/8) )-1:0] mcif2wg_dat_rd_rsp_pd;
+wire mcif2wg_dat_rd_rsp_ready;
+wire mcif2wg_dat_rd_rsp_valid;
 wire nvdla_hls_gated_clk_cvt;
 wire nvdla_op_gated_clk_buffer;
 wire nvdla_op_gated_clk_cvt;
 wire nvdla_op_gated_clk_dc;
 wire nvdla_op_gated_clk_img;
 wire nvdla_op_gated_clk_mux;
+wire nvdla_op_gated_clk_wg;
 wire nvdla_op_gated_clk_wt;
 wire [3:0] reg2dp_arb_weight;
 wire [3:0] reg2dp_arb_wmb;
@@ -469,6 +473,56 @@ wire [14:0] status2dma_free_entries;
 wire status2dma_fsm_switch;
 wire [13:0] status2dma_valid_slices;
 wire [14:0] status2dma_wr_idx;
+wire wg2cvt_dat_wr_en;
+//: my $dmaif=64;
+//: my $atmc=8*8;
+//: if($dmaif < $atmc) {
+//: my $k = int(log(int($atmc/$dmaif))/log(2));
+//: print qq(
+//: wire [${k}-1:0] wg2cvt_dat_wr_sel;
+//: wire [16:0] wg2cvt_dat_wr_addr;
+//: wire [${dmaif}-1:0] wg2cvt_dat_wr_data;
+//: );
+//: } elsif($dmaif > $atmc) {
+//: my $k = int(log(int($dmaif/$atmc))/log(2));
+//: print qq(
+//: wire [${k}-1:0] wg2cvt_dat_wr_mask;
+//: );
+//: foreach my $i (0..$k-1) {
+//: print qq(
+//: wire [16:0] wg2cvt_dat_wr_addr${i};
+//: wire [${dmaif}-1:0] wg2cvt_dat_wr_data${i};
+//: );
+//: }
+//: } else {
+//: print qq(
+//: wire [16:0] wg2cvt_dat_wr_addr;
+//: wire [${dmaif}-1:0] wg2cvt_dat_wr_data;
+//: );
+//: }
+//wire [11:0] wg2cvt_dat_wr_addr;
+//wire [511:0] wg2cvt_dat_wr_data;
+//wire wg2cvt_dat_wr_hsel;
+wire [11:0] wg2cvt_dat_wr_info_pd;
+wire [7:0] wg2sbuf_p0_rd_addr;
+wire [255:0] wg2sbuf_p0_rd_data;
+wire wg2sbuf_p0_rd_en;
+wire [7:0] wg2sbuf_p0_wr_addr;
+wire [255:0] wg2sbuf_p0_wr_data;
+wire wg2sbuf_p0_wr_en;
+wire [7:0] wg2sbuf_p1_rd_addr;
+wire [255:0] wg2sbuf_p1_rd_data;
+wire wg2sbuf_p1_rd_en;
+wire [7:0] wg2sbuf_p1_wr_addr;
+wire [255:0] wg2sbuf_p1_wr_data;
+wire wg2sbuf_p1_wr_en;
+wire [14:0] wg2status_dat_entries;
+wire [13:0] wg2status_dat_slices;
+wire wg2status_dat_updt;
+wire [1:0] wg2status_state;
+wire [( 32 + 15 )-1:0] wg_dat2mcif_rd_req_pd;
+wire wg_dat2mcif_rd_req_ready;
+wire wg_dat2mcif_rd_req_valid;
 wire [1:0] wt2status_state;
 ///////////////////////////////////////////////////////////////////////////
 //==========================================================
@@ -792,10 +846,120 @@ NV_NVDLA_CDMA_slcg u_slcg_dc (
   ,.tmc2slcg_disable_clock_gating (tmc2slcg_disable_clock_gating)
   ,.nvdla_core_gated_clk (nvdla_op_gated_clk_dc)
   );
-assign slcg_wg_gate_dc = 1'b1;
-assign slcg_wg_gate_img = 1'b1;
-assign dp2reg_wg_rd_latency = 32'b0;
-assign dp2reg_wg_rd_stall = 32'b0;
+//==========================================================
+// Winograd convolution DMA
+//==========================================================
+NV_NVDLA_CDMA_wg u_wg (
+   .nvdla_core_clk (nvdla_op_gated_clk_wg)
+  ,.nvdla_core_rstn (nvdla_core_rstn)
+  ,.pwrbus_ram_pd (pwrbus_ram_pd[31:0])
+  ,.wg_dat2mcif_rd_req_valid (wg_dat2mcif_rd_req_valid)
+  ,.wg_dat2mcif_rd_req_ready (wg_dat2mcif_rd_req_ready)
+  ,.wg_dat2mcif_rd_req_pd (wg_dat2mcif_rd_req_pd )
+  ,.mcif2wg_dat_rd_rsp_valid (mcif2wg_dat_rd_rsp_valid)
+  ,.mcif2wg_dat_rd_rsp_ready (mcif2wg_dat_rd_rsp_ready)
+  ,.mcif2wg_dat_rd_rsp_pd (mcif2wg_dat_rd_rsp_pd )
+  ,.wg2cvt_dat_wr_en (wg2cvt_dat_wr_en)
+//: my $dmaif=64;
+//: my $atmc=8*8;
+//: if($dmaif < $atmc) {
+//: my $k = int(log(int($atmc/$dmaif))/log(2));
+//: print qq(
+//: ,.wg2cvt_dat_wr_sel (wg2cvt_dat_wr_sel )
+//: ,.wg2cvt_dat_wr_addr (wg2cvt_dat_wr_addr )
+//: ,.wg2cvt_dat_wr_data (wg2cvt_dat_wr_data )
+//: );
+//: } elsif($dmaif > $atmc) {
+//: my $k = int(log(int($dmaif/$atmc))/log(2));
+//: print qq(
+//: ,.wg2cvt_dat_wr_mask (wg2cvt_dat_wr_mask)
+//: );
+//: foreach my $i (0..$k-1) {
+//: print qq(
+//: ,.wg2cvt_dat_wr_addr${i} (wg2cvt_dat_wr_addr${i})
+//: ,.wg2cvt_dat_wr_data${i} (wg2cvt_dat_wr_data${i})
+//: );
+//: }
+//: } else {
+//: print qq(
+//: ,.wg2cvt_dat_wr_addr (wg2cvt_dat_wr_addr )
+//: ,.wg2cvt_dat_wr_data (wg2cvt_dat_wr_data )
+//: );
+//: }
+//,.wg2cvt_dat_wr_addr (wg2cvt_dat_wr_addr )
+//,.wg2cvt_dat_wr_hsel (wg2cvt_dat_wr_hsel)
+//,.wg2cvt_dat_wr_data (wg2cvt_dat_wr_data )
+  ,.wg2cvt_dat_wr_info_pd (wg2cvt_dat_wr_info_pd )
+  ,.status2dma_fsm_switch (status2dma_fsm_switch)
+  ,.wg2status_state (wg2status_state[1:0])
+  ,.wg2status_dat_updt (wg2status_dat_updt)
+  ,.wg2status_dat_entries (wg2status_dat_entries )
+  ,.wg2status_dat_slices (wg2status_dat_slices )
+  ,.status2dma_valid_slices (status2dma_valid_slices )
+  ,.status2dma_free_entries (status2dma_free_entries )
+  ,.status2dma_wr_idx (status2dma_wr_idx)
+  ,.wg2sbuf_p0_wr_en (wg2sbuf_p0_wr_en)
+  ,.wg2sbuf_p0_wr_addr (wg2sbuf_p0_wr_addr)
+  ,.wg2sbuf_p0_wr_data (wg2sbuf_p0_wr_data)
+  ,.wg2sbuf_p1_wr_en (wg2sbuf_p1_wr_en)
+  ,.wg2sbuf_p1_wr_addr (wg2sbuf_p1_wr_addr)
+  ,.wg2sbuf_p1_wr_data (wg2sbuf_p1_wr_data)
+  ,.wg2sbuf_p0_rd_en (wg2sbuf_p0_rd_en)
+  ,.wg2sbuf_p0_rd_addr (wg2sbuf_p0_rd_addr)
+  ,.wg2sbuf_p0_rd_data (wg2sbuf_p0_rd_data)
+  ,.wg2sbuf_p1_rd_en (wg2sbuf_p1_rd_en)
+  ,.wg2sbuf_p1_rd_addr (wg2sbuf_p1_rd_addr)
+  ,.wg2sbuf_p1_rd_data (wg2sbuf_p1_rd_data)
+  ,.sc2cdma_dat_pending_req (sc2cdma_dat_pending_req)
+  ,.nvdla_core_ng_clk (nvdla_core_clk)
+  ,.reg2dp_op_en (reg2dp_op_en[0])
+  ,.reg2dp_conv_mode (reg2dp_conv_mode[0])
+  ,.reg2dp_in_precision (reg2dp_in_precision[1:0])
+  ,.reg2dp_proc_precision (reg2dp_proc_precision[1:0])
+  ,.reg2dp_data_reuse (reg2dp_data_reuse[0])
+  ,.reg2dp_skip_data_rls (reg2dp_skip_data_rls[0])
+  ,.reg2dp_datain_format (reg2dp_datain_format[0])
+  ,.reg2dp_datain_width (reg2dp_datain_width[12:0])
+  ,.reg2dp_datain_height (reg2dp_datain_height[12:0])
+  ,.reg2dp_datain_width_ext (reg2dp_datain_width_ext[12:0])
+  ,.reg2dp_datain_height_ext (reg2dp_datain_height_ext[12:0])
+  ,.reg2dp_datain_channel (reg2dp_datain_channel[12:0])
+  ,.reg2dp_datain_ram_type (reg2dp_datain_ram_type[0])
+  ,.reg2dp_datain_addr_high_0 (reg2dp_datain_addr_high_0[31:0])
+//: my $atmm = 8;
+//: my $atmbw = int(log(${atmm})/log(2));
+//: print qq(
+//: ,.reg2dp_datain_addr_low_0 (reg2dp_datain_addr_low_0[31:${atmbw}])
+//: ,.reg2dp_line_stride (reg2dp_line_stride[31:${atmbw}])
+//: ,.reg2dp_surf_stride (reg2dp_surf_stride[31:${atmbw}])
+//: );
+  ,.reg2dp_entries (reg2dp_entries[13:0])
+  ,.reg2dp_conv_x_stride (reg2dp_conv_x_stride[2:0])
+  ,.reg2dp_conv_y_stride (reg2dp_conv_y_stride[2:0])
+  ,.reg2dp_pad_left (reg2dp_pad_left[4:0])
+  ,.reg2dp_pad_right (reg2dp_pad_right[5:0])
+  ,.reg2dp_pad_top (reg2dp_pad_top[4:0])
+  ,.reg2dp_pad_bottom (reg2dp_pad_bottom[5:0])
+  ,.reg2dp_pad_value (reg2dp_pad_value[15:0])
+  ,.reg2dp_data_bank (reg2dp_data_bank[4:0])
+  ,.reg2dp_dma_en (reg2dp_dma_en[0])
+  ,.slcg_wg_gate_dc (slcg_wg_gate_dc)
+  ,.slcg_wg_gate_img (slcg_wg_gate_img)
+  ,.dp2reg_wg_rd_stall (dp2reg_wg_rd_stall[31:0])
+  ,.dp2reg_wg_rd_latency (dp2reg_wg_rd_latency[31:0])
+  );
+//-------------- SLCG for WG DMA --------------//
+NV_NVDLA_CDMA_slcg u_slcg_wg (
+   .dla_clk_ovr_on_sync (dla_clk_ovr_on_sync)
+  ,.global_clk_ovr_on_sync (global_clk_ovr_on_sync)
+  ,.nvdla_core_clk (nvdla_core_clk)
+  ,.nvdla_core_rstn (nvdla_core_rstn)
+  ,.slcg_en_src_0 (slcg_op_en[2])
+  ,.slcg_en_src_1 (slcg_dc_gate_wg)
+  ,.slcg_en_src_2 (slcg_img_gate_wg)
+  ,.tmc2slcg_disable_clock_gating (tmc2slcg_disable_clock_gating)
+  ,.nvdla_core_gated_clk (nvdla_op_gated_clk_wg)
+  );
 //==========================================================
 // Image convolution DMA
 //==========================================================
@@ -958,6 +1122,9 @@ NV_NVDLA_CDMA_dma_mux u_dma_mux (
   ,.dc_dat2mcif_rd_req_valid (dc_dat2mcif_rd_req_valid)
   ,.dc_dat2mcif_rd_req_ready (dc_dat2mcif_rd_req_ready)
   ,.dc_dat2mcif_rd_req_pd (dc_dat2mcif_rd_req_pd)
+  ,.wg_dat2mcif_rd_req_valid (wg_dat2mcif_rd_req_valid)
+  ,.wg_dat2mcif_rd_req_ready (wg_dat2mcif_rd_req_ready)
+  ,.wg_dat2mcif_rd_req_pd (wg_dat2mcif_rd_req_pd)
   ,.img_dat2mcif_rd_req_valid (img_dat2mcif_rd_req_valid)
   ,.img_dat2mcif_rd_req_ready (img_dat2mcif_rd_req_ready)
   ,.img_dat2mcif_rd_req_pd (img_dat2mcif_rd_req_pd)
@@ -970,6 +1137,9 @@ NV_NVDLA_CDMA_dma_mux u_dma_mux (
   ,.mcif2dc_dat_rd_rsp_valid (mcif2dc_dat_rd_rsp_valid)
   ,.mcif2dc_dat_rd_rsp_ready (mcif2dc_dat_rd_rsp_ready)
   ,.mcif2dc_dat_rd_rsp_pd (mcif2dc_dat_rd_rsp_pd)
+  ,.mcif2wg_dat_rd_rsp_valid (mcif2wg_dat_rd_rsp_valid)
+  ,.mcif2wg_dat_rd_rsp_ready (mcif2wg_dat_rd_rsp_ready)
+  ,.mcif2wg_dat_rd_rsp_pd (mcif2wg_dat_rd_rsp_pd)
   ,.mcif2img_dat_rd_rsp_valid (mcif2img_dat_rd_rsp_valid)
   ,.mcif2img_dat_rd_rsp_ready (mcif2img_dat_rd_rsp_ready)
   ,.mcif2img_dat_rd_rsp_pd (mcif2img_dat_rd_rsp_pd)
@@ -1022,6 +1192,37 @@ NV_NVDLA_CDMA_cvt u_cvt (
 //,.dc2cvt_dat_wr_addr (dc2cvt_dat_wr_addr)
 //,.dc2cvt_dat_wr_hsel (dc2cvt_dat_wr_hsel)
 //,.dc2cvt_dat_wr_data (dc2cvt_dat_wr_data)
+  ,.wg2cvt_dat_wr_en (wg2cvt_dat_wr_en)
+//: my $dmaif=64;
+//: my $atmc=8*8;
+//: if($dmaif < $atmc) {
+//: my $k = int(log(int($atmc/$dmaif))/log(2));
+//: print qq(
+//: ,.wg2cvt_dat_wr_sel (wg2cvt_dat_wr_sel )
+//: ,.wg2cvt_dat_wr_addr (wg2cvt_dat_wr_addr )
+//: ,.wg2cvt_dat_wr_data (wg2cvt_dat_wr_data )
+//: );
+//: } elsif($dmaif > $atmc) {
+//: my $k = int(log(int($dmaif/$atmc))/log(2));
+//: print qq(
+//: ,.wg2cvt_dat_wr_mask (wg2cvt_dat_wr_mask)
+//: );
+//: foreach my $i (0..$k-1) {
+//: print qq(
+//: ,.wg2cvt_dat_wr_addr${i} (wg2cvt_dat_wr_addr${i})
+//: ,.wg2cvt_dat_wr_data${i} (wg2cvt_dat_wr_data${i})
+//: );
+//: }
+//: } else {
+//: print qq(
+//: ,.wg2cvt_dat_wr_addr (wg2cvt_dat_wr_addr )
+//: ,.wg2cvt_dat_wr_data (wg2cvt_dat_wr_data )
+//: );
+//: }
+  ,.wg2cvt_dat_wr_info_pd (wg2cvt_dat_wr_info_pd[11:0])
+//,.wg2cvt_dat_wr_addr (wg2cvt_dat_wr_addr)
+//,.wg2cvt_dat_wr_hsel (wg2cvt_dat_wr_hsel)
+//,.wg2cvt_dat_wr_data (wg2cvt_dat_wr_data)
   ,.img2cvt_dat_wr_en (img2cvt_dat_wr_en)
 //: my $dmaif=64;
 //: my $Bnum = $dmaif / 8;
@@ -1152,12 +1353,24 @@ NV_NVDLA_CDMA_shared_buffer u_shared_buffer (
   ,.dc2sbuf_p1_rd_en (1'b0)
   ,.dc2sbuf_p1_rd_addr (8'd0)
   ,.dc2sbuf_p1_rd_data ( )
+  ,.wg2sbuf_p0_wr_en (wg2sbuf_p0_wr_en)
+  ,.wg2sbuf_p0_wr_addr (wg2sbuf_p0_wr_addr)
+  ,.wg2sbuf_p0_wr_data (wg2sbuf_p0_wr_data)
+  ,.wg2sbuf_p1_wr_en (wg2sbuf_p1_wr_en)
+  ,.wg2sbuf_p1_wr_addr (wg2sbuf_p1_wr_addr)
+  ,.wg2sbuf_p1_wr_data (wg2sbuf_p1_wr_data)
   ,.img2sbuf_p0_wr_en (img2sbuf_p0_wr_en)
   ,.img2sbuf_p0_wr_addr (img2sbuf_p0_wr_addr)
   ,.img2sbuf_p0_wr_data (img2sbuf_p0_wr_data)
   ,.img2sbuf_p1_wr_en (img2sbuf_p1_wr_en)
   ,.img2sbuf_p1_wr_addr (img2sbuf_p1_wr_addr)
   ,.img2sbuf_p1_wr_data (img2sbuf_p1_wr_data)
+  ,.wg2sbuf_p0_rd_en (wg2sbuf_p0_rd_en)
+  ,.wg2sbuf_p0_rd_addr (wg2sbuf_p0_rd_addr)
+  ,.wg2sbuf_p0_rd_data (wg2sbuf_p0_rd_data)
+  ,.wg2sbuf_p1_rd_en (wg2sbuf_p1_rd_en)
+  ,.wg2sbuf_p1_rd_addr (wg2sbuf_p1_rd_addr)
+  ,.wg2sbuf_p1_rd_data (wg2sbuf_p1_rd_data)
   ,.img2sbuf_p0_rd_en (img2sbuf_p0_rd_en)
   ,.img2sbuf_p0_rd_addr (img2sbuf_p0_rd_addr)
   ,.img2sbuf_p1_rd_en (img2sbuf_p1_rd_en)
@@ -1193,6 +1406,10 @@ NV_NVDLA_CDMA_status u_status (
   ,.dc2status_dat_updt (dc2status_dat_updt)
   ,.dc2status_dat_entries (dc2status_dat_entries)
   ,.dc2status_dat_slices (dc2status_dat_slices)
+  ,.wg2status_dat_updt (wg2status_dat_updt)
+  ,.wg2status_dat_entries (wg2status_dat_entries)
+  ,.wg2status_dat_slices (wg2status_dat_slices)
+  ,.wg2status_state (wg2status_state[1:0])
   ,.img2status_dat_updt (img2status_dat_updt)
   ,.img2status_dat_entries (img2status_dat_entries)
   ,.img2status_dat_slices (img2status_dat_slices)

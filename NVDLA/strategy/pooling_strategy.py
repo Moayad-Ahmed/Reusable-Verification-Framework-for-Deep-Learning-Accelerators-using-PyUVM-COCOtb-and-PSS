@@ -34,7 +34,6 @@ class PoolingStrategy(LayerStrategy):
         kernel_size = config['kernel_size']
         stride = config['stride']
         input_shape = config['input_shape']
-        # Support both [H, W] and [H, W, C] formats
         input_h = input_shape[0]
         input_w = input_shape[1]
         
@@ -53,6 +52,18 @@ class PoolingStrategy(LayerStrategy):
         width_check = (padded_w - kernel_size) % stride
         
         error_messages = []
+
+        if padded_h < kernel_size:
+            error_messages.append(
+                f"Height too small: padded_height ({padded_h}) < kernel_size ({kernel_size})\n"
+                f"  Original height: {input_h}, Padding: top={pad_top}, bottom={pad_bottom}"
+            )
+
+        if padded_w < kernel_size:
+            error_messages.append(
+                f"Width too small: padded_width ({padded_w}) < kernel_size ({kernel_size})\n"
+                f"  Original width: {input_w}, Padding: left={pad_left}, right={pad_right}"
+            )
         
         if height_check != 0:
             error_messages.append(
@@ -70,7 +81,7 @@ class PoolingStrategy(LayerStrategy):
         
         if error_messages:
             raise ValueError(
-                " POOLING CONFIGURATION ERROR - Incompatible dimensions:\n\n" + 
+                "POOLING CONFIGURATION ERROR - Incompatible dimensions:\n\n" + 
                 "\n\n".join(error_messages) + 
                 "\n\nThe sliding window cannot reach the edge perfectly.\n" +
                 "Use formula: (padded_dimension - kernel_size) % stride = 0"

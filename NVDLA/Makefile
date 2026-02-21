@@ -33,6 +33,7 @@ VERILOG_INCLUDE_DIRS += $(WPWD)/rtl/vmod/defs
 COMPILE_ARGS += -f $(WPWD)/rtl_sources.f
 ifeq ($(SIM),questa-compat)
 COMPILE_ARGS += +define+SYNTHESIS
+SIM_ARGS += -suppress 2912
 else ifeq ($(SIM),verilator)
 COMPILE_ARGS += +define+SYNTHESIS
 COMPILE_ARGS += --no-timing

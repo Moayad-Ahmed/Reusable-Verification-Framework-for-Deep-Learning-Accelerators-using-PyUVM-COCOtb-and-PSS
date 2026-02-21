@@ -438,3 +438,60 @@ class PDP_RDMA_REG:
     
     # Debug/CYA
     D_CYA                   = BASE + 0x13  # 0x2813
+
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  SDP RDMA REGISTERS (Base: 0x2000 word = byte 0x8000)
+#  Reads operand data from DRAM for BS/BN/EW sub-processors
+# ═══════════════════════════════════════════════════════════════════════
+
+class SDP_RDMA_REG:
+    """SDP Read DMA — fetches operands from DRAM for standalone SDP mode"""
+    BASE = 0x2000
+    # Status / Control
+    S_STATUS                = BASE + 0x00   # 0x2000
+    S_POINTER               = BASE + 0x01   # 0x2001
+    D_OP_ENABLE             = BASE + 0x02   # 0x2002
+    # Data cube dimensions (value-1 encoding)
+    D_DATA_CUBE_WIDTH       = BASE + 0x03   # 0x2003
+    D_DATA_CUBE_HEIGHT      = BASE + 0x04   # 0x2004
+    D_DATA_CUBE_CHANNEL     = BASE + 0x05   # 0x2005
+    # Main source memory
+    D_SRC_BASE_ADDR_LOW     = BASE + 0x06   # 0x2006
+    D_SRC_BASE_ADDR_HIGH    = BASE + 0x07   # 0x2007
+    D_SRC_LINE_STRIDE       = BASE + 0x08   # 0x2008
+    D_SRC_SURFACE_STRIDE    = BASE + 0x09   # 0x2009
+    # BS operand DMA (BRDMA)
+    D_BRDMA_CFG             = BASE + 0x0A   # 0x200A
+    D_BS_BASE_ADDR_LOW      = BASE + 0x0B   # 0x200B
+    D_BS_BASE_ADDR_HIGH     = BASE + 0x0C   # 0x200C
+    D_BS_LINE_STRIDE        = BASE + 0x0D   # 0x200D
+    D_BS_SURFACE_STRIDE     = BASE + 0x0E   # 0x200E
+    D_BS_BATCH_STRIDE       = BASE + 0x0F   # 0x200F
+    # BN operand DMA (NRDMA)
+    D_NRDMA_CFG             = BASE + 0x10   # 0x2010
+    D_BN_BASE_ADDR_LOW      = BASE + 0x11   # 0x2011
+    D_BN_BASE_ADDR_HIGH     = BASE + 0x12   # 0x2012
+    D_BN_LINE_STRIDE        = BASE + 0x13   # 0x2013
+    D_BN_SURFACE_STRIDE     = BASE + 0x14   # 0x2014
+    D_BN_BATCH_STRIDE       = BASE + 0x15   # 0x2015
+    # EW operand DMA (ERDMA)
+    D_ERDMA_CFG             = BASE + 0x16   # 0x2016
+    D_EW_BASE_ADDR_LOW      = BASE + 0x17   # 0x2017
+    D_EW_BASE_ADDR_HIGH     = BASE + 0x18   # 0x2018
+    D_EW_LINE_STRIDE        = BASE + 0x19   # 0x2019
+    D_EW_SURFACE_STRIDE     = BASE + 0x1A   # 0x201A
+    D_EW_BATCH_STRIDE       = BASE + 0x1B   # 0x201B
+    # Feature mode / precision
+    D_FEATURE_MODE_CFG      = BASE + 0x1C   # 0x201C
+    D_SRC_DMA_CFG           = BASE + 0x1D   # 0x201D
+    # Performance
+    D_PERF_ENABLE           = BASE + 0x1E   # 0x201E
+    D_PERF_WDMA_WRITE_STALL = BASE + 0x1F   # 0x201F
+    D_PERF_LUT_UFLOW        = BASE + 0x20   # 0x2020
+    D_PERF_LUT_OFLOW        = BASE + 0x21   # 0x2021
+    D_PERF_OUT_SATURATION   = BASE + 0x22   # 0x2022
+    D_PERF_LUT_HYBRID       = BASE + 0x23   # 0x2023
+    D_PERF_LUT_LE_HIT       = BASE + 0x24   # 0x2024
+    D_PERF_LUT_LO_HIT       = BASE + 0x25   # 0x2025

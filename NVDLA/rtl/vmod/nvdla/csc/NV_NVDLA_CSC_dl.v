@@ -26,6 +26,7 @@
     `define CC_ATOMC_DIV_ATOMK_EQUAL_1
 //image stripe keep 2*atomK
 //batch keep 1
+`define CBUF_WEIGHT_COMPRESSED //whether need read WMB
 // ================================================================
 // NVDLA Open Source Project
 // 
@@ -36,6 +37,7 @@
 // File Name: NV_NVDLA_CBUF.h
     `define CBUF_BANK_RAM_CASE2
 //ram case could be 0/1/2/3/4  0:1ram/bank; 1:1*2ram/bank; 2:2*1ram/bank; 3:2*2ram/bank  4:4*1ram/bank
+    `define CBUF_WEIGHT_COMPRESSED //whether need read WMB
 `define CDMA2CBUF_DEBUG_PRINT //open debug print
 module NV_NVDLA_CSC_dl (
    nvdla_core_clk //|< i
@@ -867,7 +869,7 @@ end
 //////////////////////////////////////////////////////////////
 assign layer_st = reg2dp_op_en & is_sg_idle;
 assign is_pixel = (reg2dp_datain_format == 1'h1 );
-`ifdef NVDLA_WINOGRAD_ENABLE
+`ifdef
 assign is_winograd = (reg2dp_conv_mode == 1'h1 );
 `else
 assign is_winograd = 1'b0;
@@ -4197,7 +4199,7 @@ end
 //////////////////////////////////////////////////////////////
 //////////////// data for winograd ////////////////
 //winograd need future update
-`ifdef NVDLA_WINOGRAD_ENABLE
+`ifdef
 //6x6x8byte matrix
 assign dat_wg = ~is_winograd_d1[12] ? 2304'b0 :
                 {dat_l1c0[511:256], dat_l1c1[511:384],
@@ -4690,7 +4692,7 @@ always @(posedge nvdla_core_clk) begin
 end
 
 //| eperl: generated_end (DO NOT EDIT ABOVE)
-`ifdef NVDLA_WINOGRAD_ENABLE
+`ifdef
 //////////////////////////////////////////////////////////////
 ///// PRA units instance                                 /////
 //////////////////////////////////////////////////////////////

@@ -198,6 +198,11 @@ rtl/vmod/nvdla/sdp/NV_NVDLA_SDP_CORE_gate.v
 rtl/vmod/nvdla/sdp/NV_NVDLA_SDP_CORE_pack.v
 rtl/vmod/nvdla/sdp/NV_NVDLA_SDP_CORE_unpack.v
 rtl/vmod/nvdla/sdp/NV_NVDLA_SDP_CORE_y.v
+rtl/sdp_temp/NV_NVDLA_SDP_CORE_Y_lut.v
+rtl/sdp_temp/NV_NVDLA_SDP_HLS_Y_cvt_top.v
+rtl/sdp_temp/NV_NVDLA_SDP_HLS_Y_idx_top.v
+rtl/sdp_temp/NV_NVDLA_SDP_HLS_Y_inp_top.v
+rtl/sdp_temp/NV_NVDLA_SDP_HLS_Y_int_core.v
 rtl/vmod/nvdla/sdp/NV_NVDLA_SDP_erdma.v
 rtl/vmod/nvdla/sdp/NV_NVDLA_SDP_ERDMA_cq.v
 rtl/vmod/nvdla/sdp/NV_NVDLA_SDP_ERDMA_gate.v

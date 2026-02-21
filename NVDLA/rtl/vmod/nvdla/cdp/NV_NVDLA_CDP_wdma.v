@@ -1621,8 +1621,9 @@ initial begin
 `endif
     wr_limit_override = 0;
     wr_limit_override_value = 0; // to keep viva happy with dangles
-    if ( $value$plusargs( "NV_NVDLA_CDP_WDMA_dat_fifo_wr_limit=%d", wr_limit_override_value)) begin
+    if ( $test$plusargs( "NV_NVDLA_CDP_WDMA_dat_fifo_wr_limit" ) ) begin
         wr_limit_override = 1;
+        $value$plusargs( "NV_NVDLA_CDP_WDMA_dat_fifo_wr_limit=%d", wr_limit_override_value);
     end
 end
 // VCS coverage on

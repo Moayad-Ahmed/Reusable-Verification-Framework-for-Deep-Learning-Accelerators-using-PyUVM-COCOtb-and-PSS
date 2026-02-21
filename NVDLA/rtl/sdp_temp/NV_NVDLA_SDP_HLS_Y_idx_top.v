@@ -42,22 +42,22 @@ input [7:0] cfg_lut_lo_index_select;
 input [31:0] cfg_lut_lo_start;
 input cfg_lut_oflow_priority;
 input cfg_lut_uflow_priority;
-input [32*0 -1:0] chn_lut_in_pd;
+input [32*1 -1:0] chn_lut_in_pd;
 input chn_lut_in_pvld;
 input chn_lut_out_prdy;
 output chn_lut_in_prdy;
-output [81*0 -1:0] chn_lut_out_pd;
+output [81*1 -1:0] chn_lut_out_pd;
 output chn_lut_out_pvld;
 input nvdla_core_clk;
 input nvdla_core_rstn;
-//: my $k=0;
-//: my $bx =0*35;
-//: my $bof=0*(35+32);
-//: my $buf=0*(35+32+1);
-//: my $bsl=0*(35+32+2);
-//: my $ba =0*(35+32+3);
-//: my $beh=0*(35+32+12);
-//: my $boh=0*(35+32+13);
+//: my $k=1;
+//: my $bx =1*35;
+//: my $bof=1*(35+32);
+//: my $buf=1*(35+32+1);
+//: my $bsl=1*(35+32+2);
+//: my $ba =1*(35+32+3);
+//: my $beh=1*(35+32+12);
+//: my $boh=1*(35+32+13);
 //: foreach my $i (0..${k}-1) {
 //: print qq(
 //: wire chn_lut_in_prdy$i;
@@ -137,6 +137,56 @@ input nvdla_core_rstn;
 //: }
 //:
 //| eperl: generated_beg (DO NOT EDIT BELOW)
+
+wire chn_lut_in_prdy0;
+wire chn_lut_out_pvld0;
+wire [31:0] lut_data_in0;
+wire [8:0] lut_out_addr0;
+wire [34:0] lut_out_fraction0;
+wire lut_out_le_hit0;
+wire lut_out_lo_hit0;
+wire lut_out_oflow0;
+wire lut_out_sel0;
+wire lut_out_uflow0;
+wire [31:0] lut_out_x0;
+
+assign  lut_data_in0 = chn_lut_in_pd[32*0+31:32*0]; 
+
+NV_NVDLA_SDP_HLS_Y_int_idx y_int_idx_0 (
+   .cfg_lut_hybrid_priority (cfg_lut_hybrid_priority) //|< i
+  ,.cfg_lut_le_function (cfg_lut_le_function) //|< i
+  ,.cfg_lut_le_index_offset (cfg_lut_le_index_offset[7:0]) //|< i
+  ,.cfg_lut_le_index_select (cfg_lut_le_index_select[7:0]) //|< i
+  ,.cfg_lut_le_start (cfg_lut_le_start[31:0]) //|< i
+  ,.cfg_lut_lo_index_select (cfg_lut_lo_index_select[7:0]) //|< i
+  ,.cfg_lut_lo_start (cfg_lut_lo_start[31:0]) //|< i
+  ,.cfg_lut_oflow_priority (cfg_lut_oflow_priority) //|< i
+  ,.cfg_lut_uflow_priority (cfg_lut_uflow_priority) //|< i
+  ,.lut_data_in (lut_data_in0[31:0]) //|< w
+  ,.lut_in_pvld (chn_lut_in_pvld) //|< i
+  ,.lut_out_prdy (chn_lut_out_prdy) //|< i
+  ,.nvdla_core_clk (nvdla_core_clk) //|< i
+  ,.nvdla_core_rstn (nvdla_core_rstn) //|< i
+  ,.lut_in_prdy (chn_lut_in_prdy0) //|> w
+  ,.lut_out_frac (lut_out_fraction0[34:0]) //|> w
+  ,.lut_out_le_hit (lut_out_le_hit0) //|> w
+  ,.lut_out_lo_hit (lut_out_lo_hit0) //|> w
+  ,.lut_out_oflow (lut_out_oflow0) //|> w
+  ,.lut_out_pvld (chn_lut_out_pvld0) //|> w
+  ,.lut_out_ram_addr (lut_out_addr0[8:0]) //|> w
+  ,.lut_out_ram_sel (lut_out_sel0) //|> w
+  ,.lut_out_uflow (lut_out_uflow0) //|> w
+  ,.lut_out_x (lut_out_x0[31:0]) //|> w
+);
+
+assign   chn_lut_out_pd[34:0] = lut_out_fraction0[34:0]; 
+assign   chn_lut_out_pd[66:35] = lut_out_x0[31:0]; 
+assign   chn_lut_out_pd[67] = lut_out_oflow0 ; 
+assign   chn_lut_out_pd[68] = lut_out_uflow0 ; 
+assign   chn_lut_out_pd[69] = lut_out_sel0 ; 
+assign   chn_lut_out_pd[78:70] = lut_out_addr0[8:0]; 
+assign   chn_lut_out_pd[79] = lut_out_le_hit0 ; 
+assign   chn_lut_out_pd[80] = lut_out_lo_hit0 ; 
 
 //| eperl: generated_end (DO NOT EDIT ABOVE)
 assign chn_lut_in_prdy = chn_lut_in_prdy0;

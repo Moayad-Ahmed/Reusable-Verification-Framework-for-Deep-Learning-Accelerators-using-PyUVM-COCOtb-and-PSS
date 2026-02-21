@@ -48,21 +48,21 @@ input [31:0] cfg_mul_op;
 input cfg_mul_prelu;
 input cfg_mul_src;
 input [9:0] cfg_mul_truncate;
-input [32*0 -1:0] chn_alu_op;
+input [32*1 -1:0] chn_alu_op;
 input chn_alu_op_pvld;
-input [32*0 -1:0] chn_data_in;
+input [32*1 -1:0] chn_data_in;
 input chn_in_pvld;
-input [32*0 -1:0] chn_mul_op;
+input [32*1 -1:0] chn_mul_op;
 input chn_mul_op_pvld;
 input chn_out_prdy;
 output chn_alu_op_prdy;
-output [32*0 -1:0] chn_data_out;
+output [32*1 -1:0] chn_data_out;
 output chn_in_prdy;
 output chn_mul_op_prdy;
 output chn_out_pvld;
 input nvdla_core_clk;
 input nvdla_core_rstn;
-//: my $k=0;
+//: my $k=1;
 //: foreach my $i (0..${k}-1) {
 //: print qq(
 //: wire [31:0] chn_alu_op_${i};
@@ -83,7 +83,7 @@ assign chn_in_prdy = chn_in_prdy_0;
 assign chn_alu_op_prdy = chn_alu_op_prdy_0;
 assign chn_mul_op_prdy = chn_mul_op_prdy_0;
 assign chn_out_pvld = chn_out_pvld_0;
-//: my $k=0;
+//: my $k=1;
 //: foreach my $i (0..${k}-1) {
 //: print qq(
 //: assign chn_data_in_${i}= chn_data_in[32*${i}+31:32*${i}];

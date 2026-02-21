@@ -79,7 +79,7 @@ sync3d sync_0 (
   `ifdef NVTOOLS_SYNC2D_GENERIC_CELL
 //defparam sync_0.NV_GENERIC_CELL.first_stage_of_sync.mode = 0;
   `else
- // defparam sync_0.first_stage_of_sync.mode = 0;
+  defparam sync_0.first_stage_of_sync.mode = 0;
   `endif
 `endif
 `endif

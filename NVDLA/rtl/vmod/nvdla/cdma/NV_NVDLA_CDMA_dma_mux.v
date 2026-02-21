@@ -25,6 +25,12 @@ module NV_NVDLA_CDMA_dma_mux (
   ,dc_dat2mcif_rd_req_valid
   ,dc_dat2mcif_rd_req_ready
   ,dc_dat2mcif_rd_req_pd
+  ,wg_dat2mcif_rd_req_valid
+  ,wg_dat2mcif_rd_req_ready
+  ,wg_dat2mcif_rd_req_pd
+  ,mcif2wg_dat_rd_rsp_valid
+  ,mcif2wg_dat_rd_rsp_ready
+  ,mcif2wg_dat_rd_rsp_pd
   ,img_dat2mcif_rd_req_valid
   ,img_dat2mcif_rd_req_ready
   ,img_dat2mcif_rd_req_pd
@@ -44,6 +50,12 @@ module NV_NVDLA_CDMA_dma_mux (
 ////////////////////////////////////////////////////////////////////
 input nvdla_core_clk;
 input nvdla_core_rstn;
+input wg_dat2mcif_rd_req_valid; /* data valid */
+output wg_dat2mcif_rd_req_ready; /* data return handshake */
+input [( 32 + 15 )-1:0] wg_dat2mcif_rd_req_pd;
+output mcif2wg_dat_rd_rsp_valid; /* data valid */
+input mcif2wg_dat_rd_rsp_ready; /* data return handshake */
+output [( 64 + (64/8/8) )-1:0] mcif2wg_dat_rd_rsp_pd;
 input dc_dat2mcif_rd_req_valid; /* data valid */
 output dc_dat2mcif_rd_req_ready; /* data return handshake */
 input [( 32 + 15 )-1:0] dc_dat2mcif_rd_req_pd;
@@ -80,6 +92,11 @@ wire req_mc_out_prdy;
 wire [( 64 + (64/8/8) )-1:0] rsp_mc_in_pd;
 wire rsp_mc_in_pvld;
 wire rsp_mc_out_prdy;
+    wire mc_sel_wg_w;
+    wire [( 64 + (64/8/8) )-1:0] mcif2wg_dat_rd_rsp_pd;
+    wire mcif2wg_dat_rd_rsp_valid;
+    wire wg_dat2mcif_rd_req_ready;
+    reg mc_sel_wg;
 reg mc_sel_dc;
 reg mc_sel_img;
 ////////////////////////////////////////////////////////////////////////
@@ -87,10 +104,13 @@ reg mc_sel_img;
 ////////////////////////////////////////////////////////////////////////
 //////////////// MCIF interface ////////////////
 assign mc_sel_dc_w = dc_dat2mcif_rd_req_valid;
+assign mc_sel_wg_w = wg_dat2mcif_rd_req_valid;
 assign mc_sel_img_w = img_dat2mcif_rd_req_valid;
 assign req_mc_in_pvld = dc_dat2mcif_rd_req_valid |
+                        wg_dat2mcif_rd_req_valid |
                         img_dat2mcif_rd_req_valid;
 assign req_mc_in_pd = ({( 32 + 15 ) {mc_sel_dc_w}} & dc_dat2mcif_rd_req_pd) |
+                      ({( 32 + 15 ) {mc_sel_wg_w}} & wg_dat2mcif_rd_req_pd) |
                       ({( 32 + 15 ) {mc_sel_img_w}} & img_dat2mcif_rd_req_pd);
 //: my $k = ( 32 + 15 );
 //: &eperl::pipe("-is -wid ${k} -do req_mc_out_pd -vo req_mc_out_pvld -ri req_mc_out_prdy -di req_mc_in_pd -vi req_mc_in_pvld -ro req_mc_in_prdy");
@@ -171,11 +191,13 @@ assign req_mc_out_pd = pipe_skid_req_mc_in_pd;
 
 //| eperl: generated_end (DO NOT EDIT ABOVE)
 assign dc_dat2mcif_rd_req_ready = req_mc_in_prdy & dc_dat2mcif_rd_req_valid;
+assign wg_dat2mcif_rd_req_ready = req_mc_in_prdy & wg_dat2mcif_rd_req_valid;
 assign img_dat2mcif_rd_req_ready = req_mc_in_prdy & img_dat2mcif_rd_req_valid;
 assign cdma_dat2mcif_rd_req_valid = req_mc_out_pvld;
 assign cdma_dat2mcif_rd_req_pd = req_mc_out_pd;
 assign req_mc_out_prdy = cdma_dat2mcif_rd_req_ready;
 //: &eperl::flop("-nodeclare   -rval \"1'b0\"  -en \"req_mc_in_pvld & req_mc_in_prdy\" -d \"mc_sel_dc_w\" -q mc_sel_dc");
+//: &eperl::flop("-nodeclare   -rval \"1'b0\"  -en \"req_mc_in_pvld & req_mc_in_prdy\" -d \"mc_sel_wg_w\" -q mc_sel_wg");
 //: &eperl::flop("-nodeclare   -rval \"1'b0\"  -en \"req_mc_in_pvld & req_mc_in_prdy\" -d \"mc_sel_img_w\" -q mc_sel_img");
 //| eperl: generated_beg (DO NOT EDIT BELOW)
 always @(posedge nvdla_core_clk or negedge nvdla_core_rstn) begin
@@ -188,6 +210,20 @@ always @(posedge nvdla_core_clk or negedge nvdla_core_rstn) begin
        end else if ((req_mc_in_pvld & req_mc_in_prdy) == 1'b0) begin
        end else begin
            mc_sel_dc <= 'bx;
+       // VCS coverage on
+       end
+   end
+end
+always @(posedge nvdla_core_clk or negedge nvdla_core_rstn) begin
+   if (!nvdla_core_rstn) begin
+       mc_sel_wg <= 1'b0;
+   end else begin
+       if ((req_mc_in_pvld & req_mc_in_prdy) == 1'b1) begin
+           mc_sel_wg <= mc_sel_wg_w;
+       // VCS coverage off
+       end else if ((req_mc_in_pvld & req_mc_in_prdy) == 1'b0) begin
+       end else begin
+           mc_sel_wg <= 'bx;
        // VCS coverage on
        end
    end
@@ -295,10 +331,13 @@ assign rsp_mc_out_pd = pipe_skid_rsp_mc_in_pd;
 //| eperl: generated_end (DO NOT EDIT ABOVE)
 assign mcif2cdma_dat_rd_rsp_ready = rsp_mc_in_prdy;
 assign mcif2dc_dat_rd_rsp_valid = rsp_mc_out_pvld & mc_sel_dc;
+assign mcif2wg_dat_rd_rsp_valid = rsp_mc_out_pvld & mc_sel_wg;
 assign mcif2img_dat_rd_rsp_valid = rsp_mc_out_pvld & mc_sel_img;
 assign mcif2dc_dat_rd_rsp_pd = {( 64 + (64/8/8) ) {mc_sel_dc}} & rsp_mc_out_pd;
+assign mcif2wg_dat_rd_rsp_pd = {( 64 + (64/8/8) ) {mc_sel_wg}} & rsp_mc_out_pd;
 assign mcif2img_dat_rd_rsp_pd = {( 64 + (64/8/8) ) {mc_sel_img}} & rsp_mc_out_pd;
 assign rsp_mc_out_prdy = (mc_sel_dc & mcif2dc_dat_rd_rsp_ready) |
+                         (mc_sel_wg & mcif2wg_dat_rd_rsp_ready) |
                          (mc_sel_img & mcif2img_dat_rd_rsp_ready);
 ////////////////////////////////////////////////////////////////////////
 // Assertion //
@@ -342,6 +381,9 @@ assign rsp_mc_out_prdy = (mc_sel_dc & mcif2dc_dat_rd_rsp_ready) |
   nv_assert_no_x #(0,1,0,"No X's allowed on control signals") zzz_assert_no_x_10x (nvdla_core_clk, `ASSERT_RESET, 1'd1, (^(req_cv_in_pvld & req_cv_in_prdy))); // spyglass disable W504 SelfDeterminedExpr-ML 
   nv_assert_no_x #(0,1,0,"No X's allowed on control signals") zzz_assert_no_x_18x (nvdla_core_clk, `ASSERT_RESET, nvdla_core_rstn, (rsp_mc_out_pvld^rsp_mc_out_prdy^rsp_mc_in_pvld^rsp_mc_in_prdy)); // spyglass disable W504 SelfDeterminedExpr-ML 
   nv_assert_no_x #(0,1,0,"No X's allowed on control signals") zzz_assert_no_x_20x (nvdla_core_clk, `ASSERT_RESET, nvdla_core_rstn, (rsp_cv_out_pvld^rsp_cv_out_prdy^rsp_cv_in_pvld^rsp_cv_in_prdy)); // spyglass disable W504 SelfDeterminedExpr-ML 
+  nv_assert_zero_one_hot #(0,2,0,"Error! MCIF req conflict!") zzz_assert_zero_one_hot_11x (nvdla_core_clk, `ASSERT_RESET, {dc_dat2mcif_rd_req_valid, img_dat2mcif_rd_req_valid}); // spyglass disable W504 SelfDeterminedExpr-ML 
+  nv_assert_zero_one_hot #(0,2,0,"Error! MCIF sel conflict!") zzz_assert_zero_one_hot_16x (nvdla_core_clk, `ASSERT_RESET, {mc_sel_dc, mc_sel_img}); // spyglass disable W504 SelfDeterminedExpr-ML 
+  nv_assert_never #(0,0,"Error! Change mcif source!") zzz_assert_never_25x (nvdla_core_clk, `ASSERT_RESET, (mcif2cdma_dat_rd_rsp_valid & (|{mc_sel_dc_w, mc_sel_img_w}) & ({mc_sel_dc_w, mc_sel_img_w} != {mc_sel_dc, mc_sel_img}))); // spyglass disable W504 SelfDeterminedExpr-ML 
   nv_assert_hold_throughout_event_interval #(0,1,0,"valid removed before ready") zzz_assert_hold_throughout_event_interval_2x (nvdla_core_clk, `ASSERT_RESET, (req_mc_in_pvld && !req_mc_in_prdy), (req_mc_in_pvld), (req_mc_in_prdy)); // spyglass disable W504 SelfDeterminedExpr-ML 
   nv_assert_hold_throughout_event_interval #(0,1,0,"valid removed before ready") zzz_assert_hold_throughout_event_interval_7x (nvdla_core_clk, `ASSERT_RESET, (req_cv_in_pvld && !req_cv_in_prdy), (req_cv_in_pvld), (req_cv_in_prdy)); // spyglass disable W504 SelfDeterminedExpr-ML 
   nv_assert_hold_throughout_event_interval #(0,1,0,"valid removed before ready") zzz_assert_hold_throughout_event_interval_19x (nvdla_core_clk, `ASSERT_RESET, (rsp_mc_in_pvld && !rsp_mc_in_prdy), (rsp_mc_in_pvld), (rsp_mc_in_prdy)); // spyglass disable W504 SelfDeterminedExpr-ML 

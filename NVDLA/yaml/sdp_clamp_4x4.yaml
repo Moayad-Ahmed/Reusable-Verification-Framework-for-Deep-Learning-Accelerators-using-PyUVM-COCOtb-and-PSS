@@ -1,0 +1,30 @@
+# ═══════════════════════════════════════════════════════════════════
+# NVDLA SDP Activation — Clamp (standalone)
+#
+# Pipeline: SDP_RDMA → SDP[BS: ALU=MAX, BN: ALU=MIN] → WDMA → DRAM
+#
+# Input:  4×4 spatial, 1 channel
+# Output: 4×4 spatial, 1 channel
+#
+# Clamp behavior:
+#   out = clip(x, clamp_min, clamp_max)
+#   Implemented as: MIN( MAX(x, clamp_min), clamp_max )
+#
+# This test clamps to [-30, 30].
+# ═══════════════════════════════════════════════════════════════════
+
+test_suite:
+  - name: "NVDLA_SDP_Clamp_4x4"
+    description: "4×4 clamp [-30,30] via standalone SDP"
+
+    layers:
+      - type: "activation"
+        config:
+          activation_type: "clamp"
+          input_shape: [4, 4]
+          data_range: [-100, 100]
+          data_format: "INT8"
+
+          # Clamp parameters
+          clamp_min: -30
+          clamp_max: 30

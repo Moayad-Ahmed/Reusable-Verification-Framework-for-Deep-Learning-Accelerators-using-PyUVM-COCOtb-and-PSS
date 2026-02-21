@@ -16,6 +16,7 @@
 // File Name: NV_NVDLA_CBUF.h
     `define CBUF_BANK_RAM_CASE2
 //ram case could be 0/1/2/3/4  0:1ram/bank; 1:1*2ram/bank; 2:2*1ram/bank; 3:2*2ram/bank  4:4*1ram/bank
+    `define CBUF_WEIGHT_COMPRESSED //whether need read WMB
 `define CDMA2CBUF_DEBUG_PRINT //open debug print
 `include "simulate_x_tick.vh"
 module NV_NVDLA_cbuf (

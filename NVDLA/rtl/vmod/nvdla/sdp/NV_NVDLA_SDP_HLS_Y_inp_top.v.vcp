@@ -24,23 +24,23 @@ module NV_NVDLA_SDP_HLS_Y_inp_top (
   ,chn_inp_out_pd //|> o
   ,chn_inp_out_pvld //|> o
   );
-input [185*0 -1:0] chn_inp_in_pd;
+input [185*1 -1:0] chn_inp_in_pd;
 input chn_inp_in_pvld;
 input chn_inp_out_prdy;
 output chn_inp_in_prdy;
-output [32*0 -1:0] chn_inp_out_pd;
+output [32*1 -1:0] chn_inp_out_pd;
 output chn_inp_out_pvld;
 input nvdla_core_clk;
 input nvdla_core_rstn;
-//: my $k=0;
-//: my $bf =0*32;
-//: my $by0=0*(32+35);
-//: my $by1=0*(32+35+16);
-//: my $bsc=0*(32+35+32);
-//: my $bsf=0*(32+35+48);
-//: my $bof=0*(32+35+48+5);
-//: my $bbs=0*(32+35+85);
-//: my $bfw=0*(32+35+85+32);
+//: my $k=1;
+//: my $bf =1*32;
+//: my $by0=1*(32+35);
+//: my $by1=1*(32+35+16);
+//: my $bsc=1*(32+35+32);
+//: my $bsf=1*(32+35+48);
+//: my $bof=1*(32+35+48+5);
+//: my $bbs=1*(32+35+85);
+//: my $bfw=1*(32+35+85+32);
 //: foreach my $i (0..${k}-1) {
 //: print qq(
 //: wire chn_inp_in_prdy${i};

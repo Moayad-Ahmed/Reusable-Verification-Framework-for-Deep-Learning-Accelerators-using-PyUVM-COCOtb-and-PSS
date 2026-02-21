@@ -6,7 +6,6 @@
 // this distribution for more information.
 // ================================================================
 // File Name: nv_assert_no_x.vlib
-`timescale 1ns/1ps
 `ifdef MACROMODULE
 macromodule nv_assert_no_x (clk, reset_, start_event, test_expr);
 `else

@@ -1,0 +1,22 @@
+# ═══════════════════════════════════════════════════════════════════
+# NVDLA SDP Activation — ReLU, 8×8, 4 channels (standalone)
+#
+# Pipeline: SDP_RDMA → SDP[BS: ReLU only] → WDMA → DRAM
+#
+# Input:  8×8 spatial, 4 channels → 256 elements
+# Output: 8×8 spatial, 4 channels → 256 elements
+#
+# Tests multi-channel support.
+# ═══════════════════════════════════════════════════════════════════
+
+test_suite:
+  - name: "NVDLA_SDP_ReLU_8x8_4ch"
+    description: "8×8×4ch ReLU activation via standalone SDP"
+
+    layers:
+      - type: "activation"
+        config:
+          activation_type: "relu"
+          input_shape: [8, 8, 4]        # [H, W, C]
+          data_range: [-100, 100]
+          data_format: "INT8"

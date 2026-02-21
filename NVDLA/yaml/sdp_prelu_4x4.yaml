@@ -1,0 +1,30 @@
+# ═══════════════════════════════════════════════════════════════════
+# NVDLA SDP Activation — PReLU / Leaky ReLU (standalone)
+#
+# Pipeline: SDP_RDMA → SDP[BS: MUL prelu mode] → WDMA → DRAM
+#
+# Input:  4×4 spatial, 1 channel
+# Output: 4×4 spatial, 1 channel
+#
+# PReLU behavior:
+#   if x >= 0: out = x
+#   if x <  0: out = x * leak_factor >> shift
+#
+# leak_factor=0.25 with shift=8 → operand = round(0.25 * 256) = 64
+# ═══════════════════════════════════════════════════════════════════
+
+test_suite:
+  - name: "NVDLA_SDP_PReLU_4x4"
+    description: "4×4 PReLU (leak=0.25) via standalone SDP"
+
+    layers:
+      - type: "activation"
+        config:
+          activation_type: "prelu"
+          input_shape: [4, 4]
+          data_range: [-80, 80]
+          data_format: "INT8"
+
+          # PReLU parameters
+          leak_factor: 0.25             # slope for negative inputs
+          prelu_shift: 8                # right-shift after multiply

@@ -32,15 +32,15 @@ input cfg_cvt_bypass;
 input [31:0] cfg_cvt_offset;
 input [15:0] cfg_cvt_scale;
 input [5:0] cfg_cvt_truncate;
-input [16*0 -1:0] cvt_data_in;
+input [16*1 -1:0] cvt_data_in;
 input cvt_in_pvld;
 input cvt_out_prdy;
-output [32*0 -1:0] cvt_data_out;
+output [32*1 -1:0] cvt_data_out;
 output cvt_in_prdy;
 output cvt_out_pvld;
 input nvdla_core_clk;
 input nvdla_core_rstn;
-//: my $k=0;
+//: my $k=1;
 //: foreach my $i (0..${k}-1) {
 //: print qq(
 //: wire [15:0] cvt_data_in_${i};
@@ -77,6 +77,28 @@ input nvdla_core_rstn;
 //: }
 //| eperl: generated_beg (DO NOT EDIT BELOW)
 
+wire [15:0] cvt_data_in_0;
+wire [31:0] cvt_data_out_0;
+wire cvt_in_prdy_0;
+wire cvt_out_pvld_0;
+
+assign  cvt_data_in_0 = cvt_data_in[16*0+15:16*0]; 
+assign  cvt_data_out[32*0+31:32*0] = cvt_data_out_0; 
+
+NV_NVDLA_SDP_HLS_Y_int_cvt y_int_cvt_0 (
+   .cfg_cvt_bypass (cfg_cvt_bypass) //|< i
+  ,.cfg_cvt_offset (cfg_cvt_offset[31:0]) //|< i
+  ,.cfg_cvt_scale (cfg_cvt_scale[15:0]) //|< i
+  ,.cfg_cvt_truncate (cfg_cvt_truncate[5:0]) //|< i
+  ,.cvt_data_in (cvt_data_in_0[15:0]) //|< w
+  ,.cvt_in_pvld (cvt_in_pvld) //|< i
+  ,.cvt_out_prdy (cvt_out_prdy) //|< i
+  ,.nvdla_core_clk (nvdla_core_clk) //|< i
+  ,.nvdla_core_rstn (nvdla_core_rstn) //|< i
+  ,.cvt_data_out (cvt_data_out_0[31:0]) //|> w
+  ,.cvt_in_prdy (cvt_in_prdy_0) //|> w
+  ,.cvt_out_pvld (cvt_out_pvld_0) //|> w
+);
 
 //| eperl: generated_end (DO NOT EDIT ABOVE)
 assign cvt_in_prdy = cvt_in_prdy_0;

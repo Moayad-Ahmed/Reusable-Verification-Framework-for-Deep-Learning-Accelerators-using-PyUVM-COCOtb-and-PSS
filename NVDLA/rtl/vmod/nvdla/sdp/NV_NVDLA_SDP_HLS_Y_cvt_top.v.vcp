@@ -32,15 +32,15 @@ input cfg_cvt_bypass;
 input [31:0] cfg_cvt_offset;
 input [15:0] cfg_cvt_scale;
 input [5:0] cfg_cvt_truncate;
-input [16*0 -1:0] cvt_data_in;
+input [16*1 -1:0] cvt_data_in;
 input cvt_in_pvld;
 input cvt_out_prdy;
-output [32*0 -1:0] cvt_data_out;
+output [32*1 -1:0] cvt_data_out;
 output cvt_in_prdy;
 output cvt_out_pvld;
 input nvdla_core_clk;
 input nvdla_core_rstn;
-//: my $k=0;
+//: my $k=1;
 //: foreach my $i (0..${k}-1) {
 //: print qq(
 //: wire [15:0] cvt_data_in_${i};

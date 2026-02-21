@@ -29,6 +29,12 @@ module NV_NVDLA_CDMA_shared_buffer (
   ,dc2sbuf_p1_wr_en //|< i
   ,dc2sbuf_p1_wr_addr //|< i
   ,dc2sbuf_p1_wr_data //|< i
+  ,wg2sbuf_p0_wr_en //|< i
+  ,wg2sbuf_p0_wr_addr //|< i
+  ,wg2sbuf_p0_wr_data //|< i
+  ,wg2sbuf_p1_wr_en //|< i
+  ,wg2sbuf_p1_wr_addr //|< i
+  ,wg2sbuf_p1_wr_data //|< i
   ,img2sbuf_p0_wr_en //|< i
   ,img2sbuf_p0_wr_addr //|< i
   ,img2sbuf_p0_wr_data //|< i
@@ -41,6 +47,12 @@ module NV_NVDLA_CDMA_shared_buffer (
   ,dc2sbuf_p1_rd_en //|< i
   ,dc2sbuf_p1_rd_addr //|< i
   ,dc2sbuf_p1_rd_data //|> o
+  ,wg2sbuf_p0_rd_en //|< i
+  ,wg2sbuf_p0_rd_addr //|< i
+  ,wg2sbuf_p0_rd_data //|> o
+  ,wg2sbuf_p1_rd_en //|< i
+  ,wg2sbuf_p1_rd_addr //|< i
+  ,wg2sbuf_p1_rd_data //|> o
   ,img2sbuf_p0_rd_en //|< i
   ,img2sbuf_p0_rd_addr //|< i
   ,img2sbuf_p0_rd_data //|> o
@@ -60,6 +72,12 @@ input [8*8 -1:0] dc2sbuf_p0_wr_data;
 input dc2sbuf_p1_wr_en; /* data valid */
 input [7:0] dc2sbuf_p1_wr_addr;
 input [8*8 -1:0] dc2sbuf_p1_wr_data;
+input wg2sbuf_p0_wr_en; /* data valid */
+input [7:0] wg2sbuf_p0_wr_addr;
+input [8*8 -1:0] wg2sbuf_p0_wr_data;
+input wg2sbuf_p1_wr_en; /* data valid */
+input [7:0] wg2sbuf_p1_wr_addr;
+input [8*8 -1:0] wg2sbuf_p1_wr_data;
 input img2sbuf_p0_wr_en; /* data valid */
 input [7:0] img2sbuf_p0_wr_addr;
 input [8*8 -1:0] img2sbuf_p0_wr_data;
@@ -72,6 +90,12 @@ output [8*8 -1:0] dc2sbuf_p0_rd_data;
 input dc2sbuf_p1_rd_en; /* data valid */
 input [7:0] dc2sbuf_p1_rd_addr;
 output [8*8 -1:0] dc2sbuf_p1_rd_data;
+input wg2sbuf_p0_rd_en; /* data valid */
+input [7:0] wg2sbuf_p0_rd_addr;
+output [8*8 -1:0] wg2sbuf_p0_rd_data;
+input wg2sbuf_p1_rd_en; /* data valid */
+input [7:0] wg2sbuf_p1_rd_addr;
+output [8*8 -1:0] wg2sbuf_p1_rd_data;
 input img2sbuf_p0_rd_en; /* data valid */
 input [7:0] img2sbuf_p0_rd_addr;
 output [8*8 -1:0] img2sbuf_p0_rd_data;
@@ -88,7 +112,7 @@ output [8*8 -1:0] img2sbuf_p1_rd_data;
 //: my $b0;
 //: my $val;
 //: my @input_list;
-//: my $def_wino = 0;
+//: my $def_wino = 1;
 //: if($def_wino) {
 //: @input_list = ("dc", "wg", "img");
 //: } else {
@@ -131,7 +155,7 @@ output [8*8 -1:0] img2sbuf_p1_rd_data;
 //: my $b0;
 //: my $val;
 //: my @input_list;
-//: my $def_wino = 0;
+//: my $def_wino = 1;
 //: if($def_wino) {
 //: @input_list = ("dc", "wg", "img");
 //: } else {
@@ -263,7 +287,7 @@ output [8*8 -1:0] img2sbuf_p1_rd_data;
 //: my $b0;
 //: my $bits;
 //: my @input_list;
-//: my $def_wino = 0;
+//: my $def_wino = 1;
 //: if($def_wino) {
 //: @input_list = ("dc", "wg", "img");
 //: } else {
@@ -375,7 +399,7 @@ output [8*8 -1:0] img2sbuf_p1_rd_data;
 //: my $k;
 //: my $serial;
 //: my @input_list;
-//: my $def_wino = 0;
+//: my $def_wino = 1;
 //: if($def_wino) {
 //: @input_list = ("dc", "wg", "img");
 //: } else {
@@ -505,7 +529,7 @@ output [8*8 -1:0] img2sbuf_p1_rd_data;
 //: my $serial;
 //: my $val;
 //: my @input_list;
-//: my $def_wino = 0;
+//: my $def_wino = 1;
 //: if($def_wino) {
 //: @input_list = ("dc", "wg", "img");
 //: } else {
@@ -561,7 +585,7 @@ output [8*8 -1:0] img2sbuf_p1_rd_data;
 //: my $b0;
 //: my $val;
 //: my $serial;
-//: my $def_wino = 0;
+//: my $def_wino = 1;
 //:
 //: for($k = 0; $k < 2; $k ++) {
 //: print qq (assign sbuf_p${k}_norm_rdat = );
@@ -644,7 +668,7 @@ output [8*8 -1:0] img2sbuf_p1_rd_data;
 //: my $i;
 //: my $k;
 //: my @input_list;
-//: my $def_wino = 0;
+//: my $def_wino = 1;
 //: if($def_wino) {
 //: @input_list = ("dc", "wg", "img");
 //: } else {
@@ -690,11 +714,13 @@ output [8*8 -1:0] img2sbuf_p1_rd_data;
 `endif // FV_ASSERT_ON
 `ifndef SYNTHESIS
 // VCS coverage off
-  nv_assert_never #(0,0,"multiple write to shared buffer") zzz_assert_never_1x (nvdla_core_clk, `ASSERT_RESET, ((dc2sbuf_p0_wr_en | dc2sbuf_p1_wr_en) & (img2sbuf_p0_wr_en | img2sbuf_p1_wr_en))); // spyglass disable W504 SelfDeterminedExpr-ML 
-  nv_assert_never #(0,0,"multiple read to shared buffer") zzz_assert_never_2x (nvdla_core_clk, `ASSERT_RESET, ((dc2sbuf_p0_rd_en | dc2sbuf_p1_rd_en) & (img2sbuf_p0_rd_en | img2sbuf_p1_rd_en))); // spyglass disable W504 SelfDeterminedExpr-ML 
+  nv_assert_never #(0,0,"multiple write to shared buffer") zzz_assert_never_1x (nvdla_core_clk, `ASSERT_RESET, ((dc2sbuf_p0_wr_en | dc2sbuf_p1_wr_en) & (wg2sbuf_p0_wr_en | wg2sbuf_p1_wr_en)) | ((dc2sbuf_p0_wr_en | dc2sbuf_p1_wr_en) & (img2sbuf_p0_wr_en | img2sbuf_p1_wr_en)) | ((wg2sbuf_p0_wr_en | wg2sbuf_p1_wr_en) & (img2sbuf_p0_wr_en | img2sbuf_p1_wr_en))); // spyglass disable W504 SelfDeterminedExpr-ML 
+  nv_assert_never #(0,0,"multiple read to shared buffer") zzz_assert_never_2x (nvdla_core_clk, `ASSERT_RESET, ((dc2sbuf_p0_rd_en | dc2sbuf_p1_rd_en) & (wg2sbuf_p0_rd_en | wg2sbuf_p1_rd_en)) | ((dc2sbuf_p0_rd_en | dc2sbuf_p1_rd_en) & (img2sbuf_p0_rd_en | img2sbuf_p1_rd_en)) | ((wg2sbuf_p0_rd_en | wg2sbuf_p1_rd_en) & (img2sbuf_p0_rd_en | img2sbuf_p1_rd_en))); // spyglass disable W504 SelfDeterminedExpr-ML 
   nv_assert_never #(0,0,"dc write same buffer") zzz_assert_never_3x (nvdla_core_clk, `ASSERT_RESET, (dc2sbuf_p0_wr_en & dc2sbuf_p1_wr_en & (dc2sbuf_p0_wr_bsel == dc2sbuf_p1_wr_bsel))); // spyglass disable W504 SelfDeterminedExpr-ML 
+  nv_assert_never #(0,0,"wg write same buffer") zzz_assert_never_4x (nvdla_core_clk, `ASSERT_RESET, (wg2sbuf_p0_wr_en & wg2sbuf_p1_wr_en & (wg2sbuf_p0_wr_bsel == wg2sbuf_p1_wr_bsel))); // spyglass disable W504 SelfDeterminedExpr-ML 
   nv_assert_never #(0,0,"img write same buffer") zzz_assert_never_5x (nvdla_core_clk, `ASSERT_RESET, (img2sbuf_p0_wr_en & img2sbuf_p1_wr_en & (img2sbuf_p0_wr_bsel == img2sbuf_p1_wr_bsel))); // spyglass disable W504 SelfDeterminedExpr-ML 
   nv_assert_never #(0,0,"dc read same buffer") zzz_assert_never_6x (nvdla_core_clk, `ASSERT_RESET, (dc2sbuf_p0_rd_en & dc2sbuf_p1_rd_en & (dc2sbuf_p0_rd_bsel == dc2sbuf_p1_rd_bsel))); // spyglass disable W504 SelfDeterminedExpr-ML 
+  nv_assert_never #(0,0,"wg read same buffer") zzz_assert_never_7x (nvdla_core_clk, `ASSERT_RESET, (wg2sbuf_p0_rd_en & wg2sbuf_p1_rd_en & (wg2sbuf_p0_rd_bsel == wg2sbuf_p1_rd_bsel))); // spyglass disable W504 SelfDeterminedExpr-ML 
   nv_assert_never #(0,0,"img read same buffer") zzz_assert_never_8x (nvdla_core_clk, `ASSERT_RESET, (img2sbuf_p0_rd_en & img2sbuf_p1_rd_en & (img2sbuf_p0_rd_bsel == img2sbuf_p1_rd_bsel))); // spyglass disable W504 SelfDeterminedExpr-ML 
 //for(my $i = 0; $i < 16; $i ++) {
 // my $j = sprintf("%02d", $i);

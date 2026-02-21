@@ -1,0 +1,490 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║              NVDLA SDP & SDP_RDMA CONFIGURATION REFERENCE                    ║
+║                                                                              ║
+║  Pipeline: CACC ──flying──► SDP_core ──► WDMA / PDP                         ║
+║            RDMA ──memory──► SDP_core                                         ║
+║                                                                              ║
+║  SDP_RDMA  (0x8000 byte) - Reads operands from DRAM for BS/BN/EW stages     ║
+║  SDP       (0x2400 word) - Post-processing: bias, scale, activation, CVT    ║
+║                                                                              ║
+║  Internal: X1/BS ──► X2/BN ──► Y/EW ──► Output CVT                          ║
+║            Each stage: ALU → MUL → TRT → ReLU (BS/BN) or MUL→ALU→LUT (EW)  ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+SEQUENCE: Status→Pointer→LUT_Tables→LUT_Config→BS→BN→EW→Feature→CVT→Enable
+          (For RDMA: RDMA_Config→RDMA_Enable BEFORE SDP_Enable)
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 1. STATUS & CONTROL (Single registers — NOT double-buffered)                 │
+├──────────────────────────────┬────────────┬─────────────────────────────────┤
+│ Register                     │ SDP Addr   │ Value / Usage                   │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ S_STATUS (RO)                │ 0x2400     │ [1:0]=G0, [17:16]=G1           │
+│                              │            │ 0=IDLE, 1=RUN, 2=PEND          │
+│                              │            │ Poll until idle                 │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ S_POINTER (set first)        │ 0x2401     │ [0]=producer: 0=G0, 1=G1       │
+│                              │            │ [16]=consumer (RO)              │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_OP_ENABLE (set LAST)       │ 0x240E     │ 0x1=START (after all config)   │
+└──────────────────────────────┴────────────┴─────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 2. LUT ACCESS (Single regs — program BEFORE D_ registers)                    │
+├──────────────────────────────┬────────────┬─────────────────────────────────┤
+│ Register                     │ Addr       │ Value / Usage                   │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ S_LUT_ACCESS_CFG             │ 0x2402     │ [9:0]=addr, [16]=table_id,     │
+│                              │            │ [17]=access_type                │
+│                              │            │ table: 0=LE, 1=LO              │
+│                              │            │ access: 0=READ, 1=WRITE        │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ S_LUT_ACCESS_DATA            │ 0x2403     │ [15:0]=16-bit entry value      │
+│                              │            │ Write triggers storage          │
+├──────────────────────────────┴────────────┴─────────────────────────────────┤
+│ Write sequence: set CFG (addr|table|write), then write DATA for each entry  │
+│   LE table: 65 entries (addr 0–64),  table_id=0                             │
+│   LO table: 257 entries (addr 0–256), table_id=1                            │
+│   Example: CFG = (addr) | (1<<16) | (1<<17) → write LO[addr]               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 3. LUT CONFIGURATION (Single regs)                                           │
+├──────────────────────────────┬────────────┬─────────────────────────────────┤
+│ Register                     │ Addr       │ Value / Usage                   │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ S_LUT_CFG                    │ 0x2404     │ [0]=le_function: 0=EXP, 1=LIN  │
+│                              │            │ [4]=uflow_priority: 0=LE,1=LO  │
+│                              │            │ [5]=oflow_priority: 0=LE,1=LO  │
+│                              │            │ [6]=hybrid_priority: 0=LE,1=LO │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ S_LUT_INFO                   │ 0x2405     │ [7:0]=le_index_offset (signed) │
+│                              │            │ [15:8]=le_index_select          │
+│                              │            │ [23:16]=lo_index_select         │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ S_LUT_LE_START               │ 0x2406     │ [31:0] signed, LE range start  │
+│ S_LUT_LE_END                 │ 0x2407     │ [31:0] signed, LE range end    │
+│ S_LUT_LO_START               │ 0x2408     │ [31:0] signed, LO range start  │
+│ S_LUT_LO_END                 │ 0x2409     │ [31:0] signed, LO range end    │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ S_LUT_LE_SLOPE_SCALE         │ 0x240A     │ [15:0]=uflow, [31:16]=oflow    │
+│ S_LUT_LE_SLOPE_SHIFT         │ 0x240B     │ [4:0]=uflow, [9:5]=oflow      │
+│ S_LUT_LO_SLOPE_SCALE         │ 0x240C     │ [15:0]=uflow, [31:16]=oflow   │
+│ S_LUT_LO_SLOPE_SHIFT         │ 0x240D     │ [4:0]=uflow, [9:5]=oflow      │
+├──────────────────────────────┴────────────┴─────────────────────────────────┤
+│ Slope = extrapolation outside table range. For saturating functions          │
+│ (sigmoid, tanh), set all slopes to 0. For ReLU-like, set oflow slope ≠ 0.  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 4. DATA CUBE DIMENSIONS — [12:0] = actual_value - 1                         │
+├──────────────────────────────┬────────────┬─────────────────────────────────┤
+│ Register                     │ SDP Addr   │ Range (0~8191 → 1~8192)        │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_DATA_CUBE_WIDTH            │ 0x240F     │ Width-1                         │
+│ D_DATA_CUBE_HEIGHT           │ 0x2410     │ Height-1                        │
+│ D_DATA_CUBE_CHANNEL          │ 0x2411     │ Channels-1                      │
+└──────────────────────────────┴────────────┴─────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 5. DESTINATION MEMORY                                                        │
+├──────────────────────────────┬────────────┬─────────────────────────────────┤
+│ D_DST_BASE_ADDR_LOW [31:0]   │ 0x2412     │ Output DRAM base addr (low)    │
+│ D_DST_BASE_ADDR_HIGH [31:0]  │ 0x2413     │ Output DRAM base addr (high)   │
+│ D_DST_LINE_STRIDE [31:0]     │ 0x2414     │ Bytes between lines            │
+│ D_DST_SURFACE_STRIDE [31:0]  │ 0x2415     │ Bytes between surfaces         │
+│ D_DST_DMA_CFG [0]            │ 0x242D     │ 0=CV(SRAM), 1=MC(DRAM)        │
+│ D_DST_BATCH_STRIDE [31:0]    │ 0x242E     │ Bytes between batches          │
+└──────────────────────────────┴────────────┴─────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 6. BS (Bias/Scale) SUB-PROCESSOR — X1 Stage                                 │
+│    Pipeline: data → ALU → MUL → TRT → ReLU → out                            │
+│    Operands: 16-bit (from register or BRDMA)                                │
+├──────────────────────────────┬────────────┬─────────────────────────────────┤
+│ Register                     │ Addr       │ Value / Usage                   │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_DP_BS_CFG                  │ 0x2416     │ [0]=bypass (1=skip entire BS)  │
+│                              │            │ [1]=alu_bypass                  │
+│                              │            │ [3:2]=alu_algo: 0=MAX,1=MIN,   │
+│                              │            │    2=SUM                        │
+│                              │            │ [4]=mul_bypass                  │
+│                              │            │ [5]=mul_prelu (1=PReLU mode)   │
+│                              │            │ [6]=relu_bypass (0=ReLU ON)    │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_DP_BS_ALU_CFG              │ 0x2417     │ [0]=src: 0=REG, 1=MEM(BRDMA)  │
+│                              │            │ [13:8]=shift_value (0–63)      │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_DP_BS_ALU_SRC_VALUE        │ 0x2418     │ [15:0] signed 16-bit operand   │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_DP_BS_MUL_CFG              │ 0x2419     │ [0]=src: 0=REG, 1=MEM         │
+│                              │            │ [15:8]=shift_value (truncation)│
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_DP_BS_MUL_SRC_VALUE        │ 0x241A     │ [15:0] signed 16-bit operand   │
+├──────────────────────────────┴────────────┴─────────────────────────────────┤
+│ D_DP_BS_CFG bit encoding examples:                                           │
+│   0x01 = bypass entirely                                                     │
+│   0x08 = active, ALU=SUM, MUL active, ReLU active                           │
+│   0x12 = active, ALU bypass, MUL bypass, ReLU ON (ReLU-only mode)           │
+│   0x48 = active, ALU=SUM, MUL active, ReLU bypass (bias+scale, no ReLU)    │
+│   0x32 = active, ALU bypass, MUL bypass, PReLU ON, ReLU bypass              │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 7. BN (Batch Norm) SUB-PROCESSOR — X2 Stage                                 │
+│    Pipeline: data → ALU → MUL → TRT → ReLU → out                            │
+│    Operands: 16-bit (from register or NRDMA)                                │
+│    Identical register structure to BS                                        │
+├──────────────────────────────┬────────────┬─────────────────────────────────┤
+│ Register                     │ Addr       │ Value / Usage                   │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_DP_BN_CFG                  │ 0x241B     │ Same fields as D_DP_BS_CFG     │
+│                              │            │ [0]=bypass, [1]=alu_bypass,     │
+│                              │            │ [3:2]=alu_algo, [4]=mul_bypass, │
+│                              │            │ [5]=mul_prelu, [6]=relu_bypass │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_DP_BN_ALU_CFG              │ 0x241C     │ [0]=src, [13:8]=shift_value    │
+│ D_DP_BN_ALU_SRC_VALUE        │ 0x241D     │ [15:0] signed 16-bit operand   │
+│ D_DP_BN_MUL_CFG              │ 0x241E     │ [0]=src, [15:8]=shift_value    │
+│ D_DP_BN_MUL_SRC_VALUE        │ 0x241F     │ [15:0] signed 16-bit operand   │
+├──────────────────────────────┴────────────┴─────────────────────────────────┤
+│ D_DP_BN_CFG bit encoding: same as BS. See Section 6 examples.               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 8. EW (Element-Wise) SUB-PROCESSOR — Y Stage                                │
+│    Pipeline: data → MUL → ALU → LUT → out  (NOTE: MUL before ALU!)          │
+│    Operands: 32-bit (wider than BS/BN)                                       │
+│    Has LUT for activation functions (sigmoid, tanh, etc.)                    │
+│    Has input converters on ALU and MUL paths                                │
+├──────────────────────────────┬────────────┬─────────────────────────────────┤
+│ Register                     │ Addr       │ Value / Usage                   │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_DP_EW_CFG                  │ 0x2420     │ [0]=bypass (1=skip entire EW)  │
+│                              │            │ [1]=alu_bypass                  │
+│                              │            │ [3:2]=alu_algo: 0=MAX,1=MIN,   │
+│                              │            │    2=SUM, 3=EQL                 │
+│                              │            │ [4]=mul_bypass                  │
+│                              │            │ [5]=mul_prelu (1=PReLU mode)   │
+│                              │            │ [6]=lut_bypass (0=LUT ON)      │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_DP_EW_ALU_CFG              │ 0x2421     │ [0]=src: 0=REG, 1=MEM(ERDMA)  │
+│                              │            │ [1]=cvt_bypass                  │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_DP_EW_ALU_SRC_VALUE        │ 0x2422     │ [31:0] signed 32-bit operand   │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_DP_EW_ALU_CVT_OFFSET       │ 0x2423     │ [31:0] conv offset for ALU in  │
+│ D_DP_EW_ALU_CVT_SCALE        │ 0x2424     │ [15:0] conv scale for ALU in   │
+│ D_DP_EW_ALU_CVT_TRUNCATE     │ 0x2425     │ [5:0] conv truncate for ALU in │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_DP_EW_MUL_CFG              │ 0x2426     │ [0]=src: 0=REG, 1=MEM         │
+│                              │            │ [1]=cvt_bypass                  │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_DP_EW_MUL_SRC_VALUE        │ 0x2427     │ [31:0] signed 32-bit operand   │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_DP_EW_MUL_CVT_OFFSET       │ 0x2428     │ [31:0] conv offset for MUL in  │
+│ D_DP_EW_MUL_CVT_SCALE        │ 0x2429     │ [15:0] conv scale for MUL in   │
+│ D_DP_EW_MUL_CVT_TRUNCATE     │ 0x242A     │ [5:0] conv truncate for MUL in │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_DP_EW_TRUNCATE_VALUE       │ 0x242B     │ [9:0] output truncate bits     │
+├──────────────────────────────┴────────────┴─────────────────────────────────┤
+│ D_DP_EW_CFG bit encoding examples:                                           │
+│   0x01 = bypass entirely                                                     │
+│   0x12 = active, ALU bypass, MUL bypass, LUT ON (LUT-only activation)       │
+│   0x52 = active, ALU bypass, MUL bypass, PReLU, LUT bypass                  │
+│   0x00 = active, all sub-blocks ON (ALU+MUL+LUT)                            │
+│   0x40 = active, ALU/MUL/PReLU active, LUT bypass                           │
+│   Input converters: out = (in - offset) * scale >> truncate                  │
+│       Bypass with cvt_bypass=1, or identity: offset=0, scale=1, trunc=0     │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 9. FEATURE MODE & DATA FORMAT                                                │
+├──────────────────────────────┬────────────┬─────────────────────────────────┤
+│ Register                     │ Addr       │ Value / Usage                   │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_FEATURE_MODE_CFG           │ 0x242C     │ [0]=flying: 0=OFF(RDMA→mem),   │
+│                              │            │    1=ON (from CACC)              │
+│                              │            │ [1]=output_dst: 0=MEM, 1=PDP   │
+│                              │            │ [2]=winograd: 0=OFF, 1=ON      │
+│                              │            │ [3]=nan_to_zero: 1=flush NaN   │
+│                              │            │ [12:8]=batch_number (0-based)  │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_DATA_FORMAT                │ 0x242F     │ [1:0]=proc_precision           │
+│                              │            │ [3:2]=out_precision             │
+│                              │            │ 0=INT8, 1=INT16, 2=FP16        │
+├──────────────────────────────┴────────────┴─────────────────────────────────┤
+│ Common D_FEATURE_MODE_CFG values:                                            │
+│   0x01 = flying ON, dest=MEM, no winograd (conv passthrough)                │
+│   0x03 = flying ON, dest=PDP (conv→SDP→PDP pipeline)                        │
+│   0x00 = flying OFF, dest=MEM (standalone SDP from memory)                  │
+│ Common D_DATA_FORMAT values:                                                 │
+│   0x00 = INT8 proc + INT8 out                                               │
+│   0x04 = INT8 proc + INT16 out                                              │
+│   0x05 = INT16 proc + INT16 out                                             │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 10. OUTPUT CONVERTER (CVT)                                                   │
+│     out = saturate( (data - cvt_offset) × cvt_scale >> cvt_shift )          │
+├──────────────────────────────┬────────────┬─────────────────────────────────┤
+│ Register                     │ Addr       │ Value / Usage                   │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_CVT_OFFSET [31:0]          │ 0x2430     │ Signed offset (subtracted)     │
+│ D_CVT_SCALE [15:0]           │ 0x2431     │ Scale multiplier               │
+│ D_CVT_SHIFT [5:0]            │ 0x2432     │ Right-shift amount (0–63)      │
+├──────────────────────────────┴────────────┴─────────────────────────────────┤
+│ Identity (passthrough): offset=0x0, scale=0x1, shift=0x0                    │
+│ For re-quantization after LUT: adjust to map LUT output → INT8 range        │
+│ Saturation: clamps to [−128,127] for INT8 or [−32768,32767] for INT16      │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 11. STATUS & PERFORMANCE (Read-Only / Debug)                                 │
+├──────────────────────────────┬────────────┬─────────────────────────────────┤
+│ Register                     │ Addr       │ Value / Usage                   │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_STATUS (RO)                │ 0x2433     │ [0]=EQL mode unequal flag      │
+│ D_STATUS_NAN_INPUT_NUM (RO)  │ 0x2434     │ NaN input element count        │
+│ D_STATUS_INF_INPUT_NUM (RO)  │ 0x2435     │ Inf input element count        │
+│ D_STATUS_NAN_OUTPUT_NUM (RO) │ 0x2436     │ NaN output element count       │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_PERF_ENABLE                │ 0x2437     │ [0]=dma_en, [1]=lut_en,        │
+│                              │            │ [2]=sat_en, [3]=nan_inf_en     │
+│ D_PERF_WDMA_WRITE_STALL (RO)│ 0x2438     │ WDMA write stall cycles        │
+│ D_PERF_LUT_UFLOW (RO)       │ 0x2439     │ LUT underflow count            │
+│ D_PERF_LUT_OFLOW (RO)       │ 0x243A     │ LUT overflow count             │
+│ D_PERF_OUT_SATURATION (RO)   │ 0x243B     │ Output saturation count        │
+│ D_PERF_LUT_HYBRID (RO)      │ 0x243C     │ Both LE+LO hit count           │
+│ D_PERF_LUT_LE_HIT (RO)      │ 0x243D     │ LE-only hit count              │
+│ D_PERF_LUT_LO_HIT (RO)      │ 0x243E     │ LO-only hit count              │
+└──────────────────────────────┴────────────┴─────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 12. SDP RDMA REGISTERS (Byte addresses — 0x8000 base)                        │
+│     Reads operand data from DRAM for BS/BN/EW when using memory operands    │
+│     NOTE: Not yet defined in Layers_regs_addresses.py                        │
+├──────────────────────────────┬────────────┬─────────────────────────────────┤
+│ Register                     │ Byte Addr  │ Value / Usage                   │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ S_STATUS (RO)                │ 0x8000     │ [1:0]=G0, [17:16]=G1 status    │
+│ S_POINTER                    │ 0x8004     │ [0]=producer group select       │
+│ D_OP_ENABLE                  │ 0x8008     │ [0]=enable (set before SDP)    │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_DATA_CUBE_WIDTH            │ 0x800C     │ [12:0] Width-1                  │
+│ D_DATA_CUBE_HEIGHT           │ 0x8010     │ [12:0] Height-1                 │
+│ D_DATA_CUBE_CHANNEL          │ 0x8014     │ [12:0] Channels-1               │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_SRC_BASE_ADDR_LOW          │ 0x8018     │ [31:0] Main source addr low    │
+│ D_SRC_BASE_ADDR_HIGH         │ 0x801C     │ [31:0] Main source addr high   │
+│ D_SRC_LINE_STRIDE            │ 0x8020     │ [31:0] Line stride (bytes)     │
+│ D_SRC_SURFACE_STRIDE         │ 0x8024     │ [31:0] Surface stride (bytes)  │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_BRDMA_CFG                  │ 0x8028     │ BS operand DMA config:          │
+│                              │            │ [0]=disable, [2:1]=data_use,   │
+│                              │            │ [3]=data_size, [4]=data_mode,  │
+│                              │            │ [5]=ram_type                    │
+│ D_BS_BASE_ADDR_LOW           │ 0x802C     │ [31:0] BS operand addr low     │
+│ D_BS_BASE_ADDR_HIGH          │ 0x8030     │ [31:0] BS operand addr high    │
+│ D_BS_LINE_STRIDE             │ 0x8034     │ [31:0] BS line stride          │
+│ D_BS_SURFACE_STRIDE          │ 0x8038     │ [31:0] BS surface stride       │
+│ D_BS_BATCH_STRIDE            │ 0x803C     │ [31:0] BS batch stride         │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_NRDMA_CFG                  │ 0x8040     │ BN operand DMA (same fields)   │
+│ D_BN_BASE_ADDR_LOW           │ 0x8044     │ [31:0] BN operand addr low     │
+│ D_BN_BASE_ADDR_HIGH          │ 0x8048     │ [31:0] BN operand addr high    │
+│ D_BN_LINE_STRIDE             │ 0x804C     │ [31:0] BN line stride          │
+│ D_BN_SURFACE_STRIDE          │ 0x8050     │ [31:0] BN surface stride       │
+│ D_BN_BATCH_STRIDE            │ 0x8054     │ [31:0] BN batch stride         │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_ERDMA_CFG                  │ 0x8058     │ EW operand DMA (same fields)   │
+│ D_EW_BASE_ADDR_LOW           │ 0x805C     │ [31:0] EW operand addr low     │
+│ D_EW_BASE_ADDR_HIGH          │ 0x8060     │ [31:0] EW operand addr high    │
+│ D_EW_LINE_STRIDE             │ 0x8064     │ [31:0] EW line stride          │
+│ D_EW_SURFACE_STRIDE          │ 0x8068     │ [31:0] EW surface stride       │
+│ D_EW_BATCH_STRIDE            │ 0x806C     │ [31:0] EW batch stride         │
+├──────────────────────────────┼────────────┼─────────────────────────────────┤
+│ D_FEATURE_MODE_CFG           │ 0x8070     │ [0]=flying, [3:1]=in_prec,     │
+│                              │            │ [7:4]=proc_prec, [11:8]=out,   │
+│                              │            │ [17:12]=batch_number            │
+│ D_SRC_DMA_CFG               │ 0x8074     │ [0]=ram_type: 0=CV, 1=MC       │
+├──────────────────────────────┴────────────┴─────────────────────────────────┤
+│ xRDMA_CFG bit fields (BRDMA/NRDMA/ERDMA — same encoding):                   │
+│   [0]=disable: 0=enabled, 1=disabled (default all disabled)                 │
+│   [2:1]=data_use: 0=MUL, 1=ALU, 2=BOTH (ALU+MUL)                          │
+│   [3]=data_size: 0=ONE_BYTE(INT8), 1=TWO_BYTE(INT16)                       │
+│   [4]=data_mode: 0=PER_KERNEL(broadcast), 1=PER_ELEMENT                    │
+│   [5]=ram_type: 0=CV(SRAM), 1=MC(DRAM)                                     │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+                    ACTIVATION FUNCTION RECIPES
+═══════════════════════════════════════════════════════════════════════════════
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ A. ReLU (simplest) — BS stage ReLU only                                      │
+├──────────────────────────────┬───────────────────────────────────────────────┤
+│ D_DP_BS_CFG                  │ 0x00000012  (alu bypass, mul bypass, relu ON)│
+│ D_DP_BN_CFG                  │ 0x00000001  (bypass)                         │
+│ D_DP_EW_CFG                  │ 0x00000001  (bypass)                         │
+│ D_FEATURE_MODE_CFG           │ 0x00000001  (flying=ON)                      │
+│ D_CVT_OFFSET/SCALE/SHIFT     │ 0x0 / 0x1 / 0x0  (identity)                │
+└──────────────────────────────┴───────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ B. PReLU (Leaky ReLU) — BS stage MUL with prelu=1                            │
+├──────────────────────────────┬───────────────────────────────────────────────┤
+│ D_DP_BS_CFG                  │ 0x00000022  (alu bypass, mul ON, prelu,      │
+│                              │              relu bypass)                     │
+│ D_DP_BS_MUL_CFG              │ 0x00000000  (src=REG)                        │
+│ D_DP_BS_MUL_SRC_VALUE        │ leak_factor (e.g. 0x0019 ≈ 0.1 × 256)      │
+│ D_DP_BN_CFG                  │ 0x00000001  (bypass)                         │
+│ D_DP_EW_CFG                  │ 0x00000001  (bypass)                         │
+├──────────────────────────────┴───────────────────────────────────────────────┤
+│ PReLU: if x≥0 → pass through; if x<0 → x × leak_factor >> shift            │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ C. Bias + Scale + ReLU — BS stage full pipeline                              │
+├──────────────────────────────┬───────────────────────────────────────────────┤
+│ D_DP_BS_CFG                  │ 0x00000008  (alu=SUM, mul ON, relu ON)       │
+│ D_DP_BS_ALU_CFG              │ shift << 8  (src=REG, shift as needed)      │
+│ D_DP_BS_ALU_SRC_VALUE        │ bias_value  (16-bit signed)                  │
+│ D_DP_BS_MUL_CFG              │ shift << 8  (src=REG, truncation shift)     │
+│ D_DP_BS_MUL_SRC_VALUE        │ scale_value (16-bit signed)                  │
+│ D_DP_BN_CFG                  │ 0x00000001  (bypass)                         │
+│ D_DP_EW_CFG                  │ 0x00000001  (bypass)                         │
+├──────────────────────────────┴───────────────────────────────────────────────┤
+│ Computes: ReLU( (data + bias<<shift) × scale >> shift )                      │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ D. Sigmoid / Tanh — EW stage LUT activation                                  │
+├──────────────────────────────┬───────────────────────────────────────────────┤
+│ 1. Program LUT tables first (see Section 2 LUT ACCESS above)                │
+│    Sigmoid: LO 257 entries of 1/(1+e^-x), LE 65 entries (exp spacing)      │
+│    Tanh:    LO 257 entries of tanh(x), LE 65 entries                        │
+│ 2. Configure LUT range and slopes (Section 3)                                │
+│    Sigmoid/Tanh saturate → set all slopes = 0                                │
+├──────────────────────────────┼───────────────────────────────────────────────┤
+│ D_DP_BS_CFG                  │ 0x00000001  (bypass)                         │
+│ D_DP_BN_CFG                  │ 0x00000001  (bypass)                         │
+│ D_DP_EW_CFG                  │ 0x00000012  (alu bypass, mul bypass, LUT ON) │
+│ D_DATA_FORMAT                │ 0x00000000  (INT8 proc + INT8 out)           │
+│ D_CVT_OFFSET                 │ adjust for LUT output → INT8 mapping        │
+│ D_CVT_SCALE                  │ re-quantization scale                        │
+│ D_CVT_SHIFT                  │ right-shift after scale                      │
+├──────────────────────────────┴───────────────────────────────────────────────┤
+│ LUT interpolation: result = y0 + fraction × (y1 − y0), 16-bit output        │
+│ LE table: 65 entries (exponential or linear indexing)                         │
+│ LO table: 257 entries (always linear indexing)                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ E. Clamp (Min/Max) — BS=MAX + BN=MIN                                        │
+├──────────────────────────────┬───────────────────────────────────────────────┤
+│ D_DP_BS_CFG                  │ 0x00000052  (alu=MAX, mul bypass, relu byp)  │
+│ D_DP_BS_ALU_SRC_VALUE        │ min_value   (lower clamp bound)              │
+│ D_DP_BN_CFG                  │ 0x00000056  (alu=MIN, mul bypass, relu byp)  │
+│ D_DP_BN_ALU_SRC_VALUE        │ max_value   (upper clamp bound)              │
+│ D_DP_EW_CFG                  │ 0x00000001  (bypass)                         │
+├──────────────────────────────┴───────────────────────────────────────────────┤
+│ Computes: MIN( MAX(data, min_value), max_value )                             │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ F. Batch Normalization — BN stage (bias + scale)                             │
+├──────────────────────────────┬───────────────────────────────────────────────┤
+│ D_DP_BS_CFG                  │ 0x00000001  (bypass)                         │
+│ D_DP_BN_CFG                  │ 0x00000008  (alu=SUM, mul ON, relu bypass)   │
+│ D_DP_BN_ALU_CFG              │ 0x00000000  (src=REG)                        │
+│ D_DP_BN_ALU_SRC_VALUE        │ -mean (quantized μ)                          │
+│ D_DP_BN_MUL_CFG              │ shift << 8  (src=REG, truncation)           │
+│ D_DP_BN_MUL_SRC_VALUE        │ gamma/sigma (quantized γ/σ)                  │
+│ D_DP_EW_CFG                  │ 0x00000001  (bypass)                         │
+│ D_CVT_OFFSET                 │ -beta (or use BS stage for bias add)         │
+├──────────────────────────────┴───────────────────────────────────────────────┤
+│ Computes: (data + (-μ)) × (γ/σ) >> shift, then CVT applies β offset        │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ G. Passthrough (Conv-only, current default)                                  │
+├──────────────────────────────┬───────────────────────────────────────────────┤
+│ D_DP_BS_CFG                  │ 0x00000001  (bypass)                         │
+│ D_DP_BN_CFG                  │ 0x00000001  (bypass)                         │
+│ D_DP_EW_CFG                  │ 0x00000001  (bypass)                         │
+│ D_FEATURE_MODE_CFG           │ 0x00000001  (flying=ON)                      │
+│ D_CVT_OFFSET/SCALE/SHIFT     │ 0x0 / 0x1 / 0x0  (identity)                │
+├──────────────────────────────┴───────────────────────────────────────────────┤
+│ Data passes through SDP unchanged. Used in current regs_configs.py          │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+                     TYPICAL CONFIGURATION SEQUENCE
+═══════════════════════════════════════════════════════════════════════════════
+
+  1. Poll status:  while(read(0x2400) & 0x3) {}    — wait SDP idle
+  2. Set group:    write(0x2401, 0x0)               — select group 0
+  3. LUT (if needed):
+     a. Write LE table: 65 × (write CFG, write DATA)
+     b. Write LO table: 257 × (write CFG, write DATA)
+     c. Configure S_LUT_CFG, S_LUT_INFO, ranges, slopes
+  4. RDMA (if memory operands):
+     a. Poll RDMA status, set RDMA pointer
+     b. Configure dims, xRDMA_CFG, addresses, strides
+     c. Write RDMA D_OP_ENABLE = 1
+  5. SDP config:
+     a. Dims: D_DATA_CUBE_WIDTH/HEIGHT/CHANNEL
+     b. Dest: D_DST_BASE_ADDR, strides
+     c. Stages: D_DP_BS_CFG, D_DP_BN_CFG, D_DP_EW_CFG + operands
+     d. Feature: D_FEATURE_MODE_CFG, D_DATA_FORMAT
+     e. CVT: D_CVT_OFFSET/SCALE/SHIFT
+  6. Enable:       write(0x240E, 0x1)               — START (must be last!)
+  7. Upstream:     Enable CACC → CMAC → CSC → CDMA (for flying mode)
+  8. Monitor:      Poll status or wait interrupt
+
+═══════════════════════════════════════════════════════════════════════════════
+                    QUICK VALUE REFERENCE TABLE
+═══════════════════════════════════════════════════════════════════════════════
+
+  STATUS:      0=IDLE, 1=RUNNING, 2=PENDING
+  FORMAT:      0=INT8, 1=INT16, 2=FP16
+  FLYING:      0=OFF (from memory via RDMA), 1=ON (from CACC)
+  OUTPUT_DST:  0=MEM (WDMA→DRAM), 1=PDP
+  RAM_TYPE:    0=CV (on-chip SRAM), 1=MC (external DRAM)
+  ALU_ALGO:    0=MAX, 1=MIN, 2=SUM, 3=EQL (EW only)
+  ALU_SRC:     0=register value, 1=memory (via xRDMA)
+  DATA_USE:    0=MUL, 1=ALU, 2=BOTH (RDMA operand routing)
+  DATA_MODE:   0=PER_KERNEL (broadcast), 1=PER_ELEMENT
+  LUT_TABLE:   0=LE (65 entries, exp/linear), 1=LO (257 entries, linear)
+  CVT_IDENTITY: offset=0, scale=1, shift=0
+
+═══════════════════════════════════════════════════════════════════════════════
+                    ADDRESS MAP SUMMARY
+═══════════════════════════════════════════════════════════════════════════════
+
+  0x2400–0x2401   SDP Status/Pointer         (2 regs, single-buffered)
+  0x2402–0x240D   SDP LUT Access/Config      (12 regs, single-buffered)
+  0x240E–0x2415   SDP Core/Dest              (8 regs, double-buffered)
+  0x2416–0x241A   SDP BS (X1)                (5 regs, double-buffered)
+  0x241B–0x241F   SDP BN (X2)                (5 regs, double-buffered)
+  0x2420–0x242B   SDP EW (Y)                 (12 regs, double-buffered)
+  0x242C–0x2432   SDP Feature/Format/CVT     (7 regs, double-buffered)
+  0x2433–0x243E   SDP Status/Perf (RO)       (12 regs, double-buffered)
+  ─────────────   ────────────────────────   ──────────
+  Total SDP:      63 registers
+
+  0x8000–0x8004   SDP RDMA Status/Pointer    (byte addresses)
+  0x8008          SDP RDMA D_OP_ENABLE
+  0x800C–0x8014   SDP RDMA Data Cube Dims
+  0x8018–0x8024   SDP RDMA Main Source
+  0x8028–0x803C   SDP RDMA BRDMA (BS operand)
+  0x8040–0x8054   SDP RDMA NRDMA (BN operand)
+  0x8058–0x806C   SDP RDMA ERDMA (EW operand)
+  0x8070–0x8074   SDP RDMA Feature/DMA Config
+  ─────────────   ────────────────────────   ──────────
+  Total RDMA:     ~37 registers
+
+═══════════════════════════════════════════════════════════════════════════════
+                              END OF GUIDE
+═══════════════════════════════════════════════════════════════════════════════

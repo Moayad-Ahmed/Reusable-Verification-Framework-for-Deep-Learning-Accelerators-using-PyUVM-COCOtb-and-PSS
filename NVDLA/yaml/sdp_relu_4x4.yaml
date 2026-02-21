@@ -1,0 +1,30 @@
+# ═══════════════════════════════════════════════════════════════════
+# NVDLA SDP Activation — ReLU (standalone, non-flying mode)
+#
+# Pipeline: SDP_RDMA → SDP[BS: ReLU only] → WDMA → DRAM
+#
+# Input:  4×4 spatial, 1 channel → 16 bytes (atom-padded: 16×8)
+# Output: 4×4 spatial, 1 channel → 16 bytes
+#
+# SDP BS stage: ALU bypass, MUL bypass, ReLU ON
+# BN and EW stages bypassed.
+# Output CVT: identity (offset=0, scale=1, shift=0)
+#
+# Golden model:
+#   out = max(0, x) for each element
+# ═══════════════════════════════════════════════════════════════════
+
+test_suite:
+  - name: "NVDLA_SDP_ReLU_4x4"
+    description: "4×4 ReLU activation via standalone SDP"
+
+    layers:
+      - type: "activation"
+        config:
+          # --- activation type ---
+          activation_type: "relu"
+
+          # --- input feature map ---
+          input_shape: [4, 4]           # [H, W] — single channel
+          data_range: [-50, 50]         # mix of positive and negative
+          data_format: "INT8"

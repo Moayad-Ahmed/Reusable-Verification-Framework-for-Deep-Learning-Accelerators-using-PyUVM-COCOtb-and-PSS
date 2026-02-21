@@ -1,0 +1,44 @@
+# ═══════════════════════════════════════════════════════════════════
+# NVDLA SDP Activation — Sigmoid (standalone, LUT-based)
+#
+# Pipeline: SDP_RDMA → SDP[EW: LUT sigmoid] → WDMA → DRAM
+#
+# Input:  4×4 spatial, 1 channel
+# Output: 4×4 spatial, 1 channel
+#
+# Sigmoid behavior:
+#   out = 1 / (1 + exp(-x))
+#
+# Implementation:
+#   BS and BN stages are bypassed.
+#   EW stage uses a 257-entry LO LUT + 65-entry LE LUT with
+#   linear interpolation to approximate sigmoid.
+#   Input range mapped to [-8.0, 8.0] (sigmoid saturates beyond ±8).
+#   LUT values stored as INT16 fixed-point (Q0.15, frac_bits=15).
+#
+# Output CVT: identity (offset=0, scale=1, shift=0)
+# ═══════════════════════════════════════════════════════════════════
+
+test_suite:
+  - name: "NVDLA_SDP_Sigmoid_4x4"
+    description: "4×4 Sigmoid activation via standalone SDP (LUT)"
+
+    layers:
+      - type: "activation"
+        config:
+          activation_type: "sigmoid"
+          input_shape: [4, 4]
+          data_range: [-50, 50]
+          data_format: "INT8"
+
+          # LUT parameters
+          lut_frac_bits: 15
+          lut_range_min: -8.0
+          lut_range_max: 8.0
+
+          # Output CVT — scale Q0.15 LUT values down to INT8
+          # sigmoid range [0,1] × 2^15 = [0,32768]
+          # >> 8 gives [0,128] → saturated to [0,127]
+          cvt_offset: 0
+          cvt_scale: 1
+          cvt_shift: 8
