@@ -519,7 +519,6 @@ class FcTestSequence(NVDLASequenceBase):
             await bfm.iteration_done_queue.get()
             print(f"FC iteration {i} checked by scoreboard.")
 
-
 # ══════════════════════════════════════════════════════════════════════
 #  CDP (NORMALIZATION / LRN) VIRTUAL SEQUENCE
 # ══════════════════════════════════════════════════════════════════════
@@ -591,12 +590,12 @@ class CdpTestSequence(NVDLASequenceBase):
             channels = config.get('num_channels', 1)
         config.setdefault('num_channels', channels)
 
-        # ---- Memory layout ----
-        atoms_per_pixel = max(1, (channels * self.BPE + self.ATOM - 1) // self.ATOM)
-        pixel_bytes     = atoms_per_pixel * self.ATOM
-        num_surfaces    = atoms_per_pixel   # same value
-        line_stride     = in_w * pixel_bytes
-        surface_stride  = line_stride * in_h
+        # ---- Memory layout (surface-planar) ----
+        # Each surface holds one ATOM of channels for all (H,W) pixels.
+        # line_stride / surface_stride are per-surface, not per-pixel-all-channels.
+        num_surfaces    = max(1, (channels * self.BPE + self.ATOM - 1) // self.ATOM)
+        line_stride     = in_w * self.ATOM         # per-surface row
+        surface_stride  = line_stride * in_h       # size of one surface
         input_total     = num_surfaces * surface_stride
 
         # ---- Generate LUT tables from LRN formula parameters ----
@@ -633,13 +632,19 @@ class CdpTestSequence(NVDLASequenceBase):
             input_bytes = self._input_to_hwc_bytes(input_data)
             self.write_hex_file(self.input_file, input_bytes)
 
-            # ---- Build expected byte list (HWC pixel order) ----
+            # ---- Build expected byte list (surface-planar order) ----
+            # Matches NVDLA DRAM layout: surface 0 (ch 0-7), surface 1 (ch 8-15), ...
             C, H, W = expected_output.shape
             expected_list = []
-            for h in range(H):
-                for w in range(W):
-                    for c in range(C):
-                        expected_list.append(int(expected_output[c, h, w]) & 0xFF)
+            for s in range(num_surfaces):
+                c_start = s * self.ATOM
+                c_end   = min(c_start + self.ATOM, C)
+                for h in range(H):
+                    for w in range(W):
+                        for c in range(c_start, c_end):
+                            expected_list.append(int(expected_output[c, h, w]) & 0xFF)
+                        # Pad to full ATOM (for non-multiple-of-8 channels)
+                        expected_list.extend([0] * (self.ATOM - (c_end - c_start)))
 
             # ---- Build DataTransaction (no weights for CDP) ----
             data_tx = DataTransaction(f"cdp_data_tx_{i}", strategy)
@@ -652,9 +657,9 @@ class CdpTestSequence(NVDLASequenceBase):
                 config, src_addr=0, dst_addr=output_base
             )
             csb_tx.output_base_addr            = output_base
-            csb_tx.output_num_pixels           = in_h * in_w
-            csb_tx.output_pixel_bytes          = pixel_bytes
-            csb_tx.output_data_bytes_per_pixel = channels * self.BPE
+            csb_tx.output_num_pixels           = in_h * in_w * num_surfaces
+            csb_tx.output_pixel_bytes          = self.ATOM
+            csb_tx.output_data_bytes_per_pixel = self.ATOM
             csb_tx.expected_output_data        = expected_list
 
             # ---- Dispatch: data first, then CSB ----
@@ -667,7 +672,6 @@ class CdpTestSequence(NVDLASequenceBase):
             # ---- Wait for scoreboard to confirm check complete ----
             await bfm.iteration_done_queue.get()
             print(f"CDP iteration {i} checked by scoreboard.")
-
 
 
 # ══════════════════════════════════════════════════════════════════════

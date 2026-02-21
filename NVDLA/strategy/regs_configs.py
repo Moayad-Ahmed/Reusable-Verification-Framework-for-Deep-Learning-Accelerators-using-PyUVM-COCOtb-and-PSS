@@ -915,10 +915,13 @@ class RegistrationConfigs:
 
         # Per-pixel: one atom holds atomic_m channels (INT8: 8 ch per atom)
         atoms_per_pixel = max(1, (channels * bpe + ATOM - 1) // ATOM)
-        pixel_bytes     = atoms_per_pixel * ATOM
+        num_surfaces    = atoms_per_pixel
 
-        # CDP output dimensions == input dimensions
-        line_stride    = in_w * pixel_bytes
+        # CDP uses SURFACE-PLANAR layout: strides are per-surface.
+        # Each surface stores one ATOM of channels for all (H,W) pixels.
+        # line_stride   = distance between consecutive rows within ONE surface
+        # surface_stride = distance between start of surface N and surface N+1
+        line_stride    = in_w * ATOM
         surface_stride = line_stride * in_h
 
         # Data format encoding

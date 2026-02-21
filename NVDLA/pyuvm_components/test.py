@@ -90,87 +90,87 @@ class NVDLATestBase(uvm_test):
 #  PDP BASE
 # ======================================================================
 #
-#class PdpTestBase(NVDLATestBase):
-#    """Base class for all PDP pooling tests."""
-#
-#    def _create_sequence(self):
-#        return PdpTestSequence(
-#            "pdp_test",
-#            input_file=input_file_path(self.DAT_FILE),
-#            config_file=config_file_path(self.YAML_FILE),
-#        )
-#
-#
-## -- Concrete PDP tests --------------------------------------------------
-#@pyuvm.test()
-#class PdpBasicTest(PdpTestBase):
-#    """Default pooling test - nvdla_pooling_config.yaml"""
-#    YAML_FILE = "nvdla_pooling_config.yaml"
-#    DAT_FILE  = "pdp_default_in.dat"
-#
-#
-#@pyuvm.test()
-#class Pdp_4x4_MAX_k2_s2(PdpTestBase):
-#    """4x4 Max Pooling, kernel=2, stride=2 -> 2x2 output"""
-#    YAML_FILE = "4x4_max_k2_s2.yaml"
-#    DAT_FILE  = "pdp_4x4_max_k2_s2_in.dat"
-#
-#
-#@pyuvm.test()
-#class Pdp_6x6_AVG_k2_s2(PdpTestBase):
-#    """6x6 Avg Pooling, kernel=2, stride=2 -> 3x3 output"""
-#    YAML_FILE = "6x6_avg_k2_s2.yaml"
-#    DAT_FILE  = "pdp_6x6_avg_k2_s2_in.dat"
-#
-#
-#@pyuvm.test()
-#class Pdp_4x4_MIN_k2_s1(PdpTestBase):
-#    """4x4 Min Pooling, kernel=2, stride=1 -> 3x3 output"""
-#    YAML_FILE = "4x4_min_k2_s1.yaml"
-#    DAT_FILE  = "pdp_4x4_min_k2_s1_in.dat"
-#
-#
-#@pyuvm.test()
-#class Pdp_8x8_MAX_k4_s4(PdpTestBase):
-#    """8x8 Max Pooling, kernel=4, stride=4 -> 2x2 output"""
-#    YAML_FILE = "8x8_max_k4_s4.yaml"
-#    DAT_FILE  = "pdp_8x8_max_k4_s4_in.dat"
-#
-#
-#@pyuvm.test()
-#class Pdp_8x8_AVG_k2_s2(PdpTestBase):
-#    """8x8 Avg Pooling, kernel=2, stride=2 -> 4x4 output"""
-#    YAML_FILE = "8x8_avg_k2_s2.yaml"
-#    DAT_FILE  = "pdp_8x8_avg_k2_s2_in.dat"
-#
-#
-#@pyuvm.test()
-#class Pdp_5x5_MAX_k3_s1_pad1(PdpTestBase):
-#    """5x5 Max Pooling, kernel=3, stride=1, pad=1 -> 5x5 output"""
-#    YAML_FILE = "5x5_max_k3_s1_pad1.yaml"
-#    DAT_FILE  = "pdp_5x5_max_k3_s1_pad1_in.dat"
-#
-#
-#@pyuvm.test()
-#class Pdp_6x6_MAX_k3_s1_pad2_valm64(PdpTestBase):
-#    """6x6 Max Pooling, kernel=3, stride=1, pad=2, pad_value=-64"""
-#    YAML_FILE = "6x6_max_k3_s1_pad2_valm64.yaml"
-#    DAT_FILE  = "pdp_6x6_max_k3_s1_pad2_valm64_in.dat"
-#
-#
-#@pyuvm.test()
-#class Pdp_4x4_AVG_k3_s2_pad3(PdpTestBase):
-#    """4x4 Avg Pooling, kernel=3, stride=2, pad=3"""
-#    YAML_FILE = "4x4_avg_k3_s2_pad3.yaml"
-#    DAT_FILE  = "pdp_4x4_avg_k3_s2_pad3_in.dat"
-#
-#
-#@pyuvm.test()
-#class Pdp_4x4_max_k2_s2_4ch(PdpTestBase):
-#    """4x4 Max Pooling, kernel=2, stride=2, 4 channels"""
-#    YAML_FILE = "4x4_max_k2_s2_4ch.yaml"
-#    DAT_FILE  = "pdp_4x4_max_k2_s2_4ch_in.dat"
-#
+class PdpTestBase(NVDLATestBase):
+    """Base class for all PDP pooling tests."""
+
+    def _create_sequence(self):
+        return PdpTestSequence(
+            "pdp_test",
+            input_file=input_file_path(self.DAT_FILE),
+            config_file=config_file_path(self.YAML_FILE),
+        )
+
+
+# -- Concrete PDP tests --------------------------------------------------
+@pyuvm.test()
+class PdpBasicTest(PdpTestBase):
+    """Default pooling test - nvdla_pooling_config.yaml"""
+    YAML_FILE = "nvdla_pooling_config.yaml"
+    DAT_FILE  = "pdp_default_in.dat"
+
+
+@pyuvm.test()
+class Pdp_4x4_MAX_k2_s2(PdpTestBase):
+    """4x4 Max Pooling, kernel=2, stride=2 -> 2x2 output"""
+    YAML_FILE = "4x4_max_k2_s2.yaml"
+    DAT_FILE  = "pdp_4x4_max_k2_s2_in.dat"
+
+
+@pyuvm.test()
+class Pdp_6x6_AVG_k2_s2(PdpTestBase):
+    """6x6 Avg Pooling, kernel=2, stride=2 -> 3x3 output"""
+    YAML_FILE = "6x6_avg_k2_s2.yaml"
+    DAT_FILE  = "pdp_6x6_avg_k2_s2_in.dat"
+
+
+@pyuvm.test()
+class Pdp_4x4_MIN_k2_s1(PdpTestBase):
+    """4x4 Min Pooling, kernel=2, stride=1 -> 3x3 output"""
+    YAML_FILE = "4x4_min_k2_s1.yaml"
+    DAT_FILE  = "pdp_4x4_min_k2_s1_in.dat"
+
+
+@pyuvm.test()
+class Pdp_8x8_MAX_k4_s4(PdpTestBase):
+    """8x8 Max Pooling, kernel=4, stride=4 -> 2x2 output"""
+    YAML_FILE = "8x8_max_k4_s4.yaml"
+    DAT_FILE  = "pdp_8x8_max_k4_s4_in.dat"
+
+
+@pyuvm.test()
+class Pdp_8x8_AVG_k2_s2(PdpTestBase):
+    """8x8 Avg Pooling, kernel=2, stride=2 -> 4x4 output"""
+    YAML_FILE = "8x8_avg_k2_s2.yaml"
+    DAT_FILE  = "pdp_8x8_avg_k2_s2_in.dat"
+
+
+@pyuvm.test()
+class Pdp_5x5_MAX_k3_s1_pad1(PdpTestBase):
+    """5x5 Max Pooling, kernel=3, stride=1, pad=1 -> 5x5 output"""
+    YAML_FILE = "5x5_max_k3_s1_pad1.yaml"
+    DAT_FILE  = "pdp_5x5_max_k3_s1_pad1_in.dat"
+
+
+@pyuvm.test()
+class Pdp_6x6_MAX_k3_s1_pad2_valm64(PdpTestBase):
+    """6x6 Max Pooling, kernel=3, stride=1, pad=2, pad_value=-64"""
+    YAML_FILE = "6x6_max_k3_s1_pad2_valm64.yaml"
+    DAT_FILE  = "pdp_6x6_max_k3_s1_pad2_valm64_in.dat"
+
+
+@pyuvm.test()
+class Pdp_4x4_AVG_k3_s2_pad3(PdpTestBase):
+    """4x4 Avg Pooling, kernel=3, stride=2, pad=3"""
+    YAML_FILE = "4x4_avg_k3_s2_pad3.yaml"
+    DAT_FILE  = "pdp_4x4_avg_k3_s2_pad3_in.dat"
+
+
+@pyuvm.test()
+class Pdp_4x4_max_k2_s2_4ch(PdpTestBase):
+    """4x4 Max Pooling, kernel=2, stride=2, 4 channels"""
+    YAML_FILE = "4x4_max_k2_s2_4ch.yaml"
+    DAT_FILE  = "pdp_4x4_max_k2_s2_4ch_in.dat"
+
 ## ======================================================================
 ##  CONV BASE
 ## ======================================================================
@@ -256,48 +256,116 @@ class NVDLATestBase(uvm_test):
 #    DAT_FILE  = "fc_8in_1out_in.dat"
 #    WT_FILE   = "fc_8in_1out_wt.dat"
 #
-## ======================================================================
-##  CDP (NORMALIZATION / LRN) BASE
-## ======================================================================
-#
-#class CdpTestBase(NVDLATestBase):
-#    """
-#    Base class for all NVDLA CDP normalization / LRN tests.
-#
-#    CDP pipeline: CDP_RDMA -> CvtIn -> SqSum -> LUT -> Mul -> CvtOut -> WDMA
-#    Output dimensions are identical to input (no spatial change).
-#    """
-#
-#    def _create_sequence(self):
-#        return CdpTestSequence(
-#            "cdp_test",
-#            input_file=input_file_path(self.DAT_FILE),
-#            config_file=config_file_path(self.YAML_FILE),
-#        )
-#
-#
-## -- Concrete CDP tests --------------------------------------------------
-#
-#@pyuvm.test()
-#class Cdp_4x4x8_LEN3_identity(CdpTestBase):
-#    """4x4x8 INT8 LRN, LEN3 (3-channel window), identity conversion"""
-#    YAML_FILE = "cdp_4x4x8_len3_identity.yaml"
-#    DAT_FILE  = "cdp_4x4x8_len3_in.dat"
-#
-#
-#@pyuvm.test()
-#class Cdp_4x4x8_LEN5(CdpTestBase):
-#    """4x4x8 INT8 LRN, LEN5 (5-channel window)"""
-#    YAML_FILE = "cdp_4x4x8_len5.yaml"
-#    DAT_FILE  = "cdp_4x4x8_len5_in.dat"
-#
-#
-#@pyuvm.test()
-#class Cdp_4x4x8_LEN9(CdpTestBase):
-#    """4x4x8 INT8 LRN, LEN9 (maximum 9-channel window)"""
-#    YAML_FILE = "cdp_4x4x8_len9.yaml"
-#    DAT_FILE  = "cdp_4x4x8_len9_in.dat"
-#
+# ======================================================================
+#  CDP (NORMALIZATION / LRN) BASE
+# ======================================================================
+
+class CdpTestBase(NVDLATestBase):
+    """
+    Base class for all NVDLA CDP normalization / LRN tests.
+
+    CDP pipeline: CDP_RDMA -> CvtIn -> SqSum -> LUT -> Mul -> CvtOut -> WDMA
+    Output dimensions are identical to input (no spatial change).
+    """
+
+    def _create_sequence(self):
+        return CdpTestSequence(
+            "cdp_test",
+            input_file=input_file_path(self.DAT_FILE),
+            config_file=config_file_path(self.YAML_FILE),
+        )
+
+
+# -- Concrete CDP tests --------------------------------------------------
+
+@pyuvm.test()
+class Cdp_4x4x8_LEN3_identity(CdpTestBase):
+    """4x4x8 INT8 LRN, LEN3 (3-channel window), identity conversion"""
+    YAML_FILE = "cdp_4x4x8_len3_identity.yaml"
+    DAT_FILE  = "cdp_4x4x8_len3_in.dat"
+
+
+@pyuvm.test()
+class Cdp_4x4x8_LEN5(CdpTestBase):
+    """4x4x8 INT8 LRN, LEN5 (5-channel window)"""
+    YAML_FILE = "cdp_4x4x8_len5.yaml"
+    DAT_FILE  = "cdp_4x4x8_len5_in.dat"
+
+
+@pyuvm.test()
+class Cdp_4x4x8_LEN9(CdpTestBase):
+    """4x4x8 INT8 LRN, LEN9 (maximum 9-channel window)"""
+    YAML_FILE = "cdp_4x4x8_len9.yaml"
+    DAT_FILE  = "cdp_4x4x8_len9_in.dat"
+
+@pyuvm.test()
+class Cdp_16x16x8_LEN3(CdpTestBase):
+    """16x16x8 INT8 LRN, LEN3 -- max spatial for 8ch in 4KB DRAM"""
+    YAML_FILE = "cdp_16x16x8_len3.yaml"
+    DAT_FILE  = "cdp_16x16x8_len3_in.dat"
+
+
+@pyuvm.test()
+class Cdp_8x8x8_LEN5_kalpha(CdpTestBase):
+    """8x8x8 INT8 LRN, LEN5, k=2 alpha=0.001 (stronger normalization)"""
+    YAML_FILE = "cdp_8x8x8_len5_kalpha.yaml"
+    DAT_FILE  = "cdp_8x8x8_len5_kalpha_in.dat"
+
+
+@pyuvm.test()
+class Cdp_4x4x16_LEN3(CdpTestBase):
+    """4x4x16 INT8 LRN, LEN3, 16 channels (2 surfaces)"""
+    YAML_FILE = "cdp_4x4x16_len3.yaml"
+    DAT_FILE  = "cdp_4x4x16_len3_in.dat"
+
+
+@pyuvm.test()
+class Cdp_8x4x16_LEN7(CdpTestBase):
+    """8x4x16 INT8 LRN, LEN7, non-square spatial, 16 channels"""
+    YAML_FILE = "cdp_8x4x16_len7.yaml"
+    DAT_FILE  = "cdp_8x4x16_len7_in.dat"
+
+
+@pyuvm.test()
+class Cdp_2x2x32_LEN9(CdpTestBase):
+    """2x2x32 INT8 LRN, LEN9, 32 channels (4 surfaces)"""
+    YAML_FILE = "cdp_2x2x32_len9.yaml"
+    DAT_FILE  = "cdp_2x2x32_len9_in.dat"
+
+
+@pyuvm.test()
+class Cdp_2x8x8_LEN5_beta1(CdpTestBase):
+    """2x8x8 INT8 LRN, LEN5, beta=1.0 (stronger exponent)"""
+    YAML_FILE = "cdp_2x8x8_len5_beta1.yaml"
+    DAT_FILE  = "cdp_2x8x8_len5_beta1_in.dat"
+
+
+@pyuvm.test()
+class Cdp_4x4x8_LEN3_offset(CdpTestBase):
+    """4x4x8 INT8 LRN, LEN3, datout_offset=5"""
+    YAML_FILE = "cdp_4x4x8_len3_offset.yaml"
+    DAT_FILE  = "cdp_4x4x8_len3_offset_in.dat"
+
+
+@pyuvm.test()
+class Cdp_4x4x8_LEN3_scale(CdpTestBase):
+    """4x4x8 INT8 LRN, LEN3, datin_scale=2 datin_shifter=1"""
+    YAML_FILE = "cdp_4x4x8_len3_scale.yaml"
+    DAT_FILE  = "cdp_4x4x8_len3_scale_in.dat"
+
+
+@pyuvm.test()
+class Cdp_3x3x24_LEN5(CdpTestBase):
+    """3x3x24 INT8 LRN, LEN5, 24 channels (3 surfaces)"""
+    YAML_FILE = "cdp_3x3x24_len5.yaml"
+    DAT_FILE  = "cdp_3x3x24_len5_in.dat"
+
+
+@pyuvm.test()
+class Cdp_1x1x8_LEN3(CdpTestBase):
+    """1x1x8 INT8 LRN, LEN3, single pixel edge case"""
+    YAML_FILE = "cdp_1x1x8_len3.yaml"
+    DAT_FILE  = "cdp_1x1x8_len3_in.dat"
 
 # ══════════════════════════════════════════════════════════════════════
 #  SDP ACTIVATION BASE
