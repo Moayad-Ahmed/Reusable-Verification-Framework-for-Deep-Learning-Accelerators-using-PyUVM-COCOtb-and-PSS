@@ -29,8 +29,8 @@ test_suite:
       - type: "activation"
         config:
           activation_type: "sigmoid"
-          input_shape: [4, 4]
-          data_range: [-50, 50]
+          input_shape: [6, 6]
+          data_range: [-128, 127]
           data_format: "INT8"
 
           # LUT parameters

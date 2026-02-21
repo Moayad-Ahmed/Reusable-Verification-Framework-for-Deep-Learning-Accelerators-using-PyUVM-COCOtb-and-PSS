@@ -1,0 +1,31 @@
+# CDP: 2x8 spatial (tall non-square), 8 channels, LEN5, high beta=1.0
+# Tests stronger exponent normalization
+# Memory: input=128B, output_base=256, total=384B
+
+test_suite:
+  - name: "NVDLA_CDP_2x8x8_LEN5_beta1"
+    description: "2x8x8 INT8 LRN, LEN5, beta=1.0 (stronger exponent)"
+
+    layers:
+      - type: "normalization"
+        config:
+          input_shape: [2, 8, 8]
+          data_range: [-5, 5]
+          data_format: "INT8"
+
+          normalz_len: 5
+
+          k: 1.0
+          alpha: 0.0001
+          beta: 1.0
+
+          datin_offset: 0
+          datin_scale: 1
+          datin_shifter: 0
+
+          datout_offset: 0
+          datout_scale: 1
+          datout_shifter: 8
+
+          lut_le_function: "LINEAR"
+          lut_priority: "LE"

@@ -21,8 +21,8 @@ test_suite:
       - type: "activation"
         config:
           activation_type: "clamp"
-          input_shape: [4, 4]
-          data_range: [-100, 100]
+          input_shape: [2, 2]
+          data_range: [-128, 127]
           data_format: "INT8"
 
           # Clamp parameters

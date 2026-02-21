@@ -25,6 +25,6 @@ test_suite:
           activation_type: "relu"
 
           # --- input feature map ---
-          input_shape: [4, 4]           # [H, W] — single channel
-          data_range: [-50, 50]         # mix of positive and negative
+          input_shape: [5, 5]           # [H, W] — single channel
+          data_range: [-128, 127]       # full INT8 range
           data_format: "INT8"

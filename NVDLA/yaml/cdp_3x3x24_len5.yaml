@@ -1,0 +1,31 @@
+# CDP: 3x3 spatial, 24 channels (3 surfaces), LEN5
+# Tests non-power-of-2 channel count and odd spatial dimensions
+# Memory: input=648B, output_base=768, total=1416B
+
+test_suite:
+  - name: "NVDLA_CDP_3x3x24_LEN5"
+    description: "3x3x24 INT8 LRN, LEN5, 24 channels (3 surfaces)"
+
+    layers:
+      - type: "normalization"
+        config:
+          input_shape: [3, 3, 24]
+          data_range: [-5, 5]
+          data_format: "INT8"
+
+          normalz_len: 5
+
+          k: 1.0
+          alpha: 0.0001
+          beta: 0.75
+
+          datin_offset: 0
+          datin_scale: 1
+          datin_shifter: 0
+
+          datout_offset: 0
+          datout_scale: 1
+          datout_shifter: 8
+
+          lut_le_function: "LINEAR"
+          lut_priority: "LE"

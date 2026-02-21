@@ -1,0 +1,33 @@
+# CDP: 4x4 spatial, 8 channels, LEN3, with datin_scale=2 + datin_shifter=1
+# Tests input conversion scaling path (scale*2 >> 1 = identity numerically,
+# but exercises the CvtIn multiply/shift pipeline)
+# Memory: input=128B, output_base=256, total=384B
+
+test_suite:
+  - name: "NVDLA_CDP_4x4x8_LEN3_scale"
+    description: "4x4x8 INT8 LRN, LEN3, datin_scale=2 datin_shifter=1"
+
+    layers:
+      - type: "normalization"
+        config:
+          input_shape: [4, 4, 8]
+          data_range: [-5, 5]
+          data_format: "INT8"
+
+          normalz_len: 3
+
+          k: 1.0
+          alpha: 0.0001
+          beta: 0.75
+
+          # Input conversion: val * 2 >> 1 = val (exercises multiply/shift)
+          datin_offset: 0
+          datin_scale: 2
+          datin_shifter: 1
+
+          datout_offset: 0
+          datout_scale: 1
+          datout_shifter: 8
+
+          lut_le_function: "LINEAR"
+          lut_priority: "LE"

@@ -18,5 +18,5 @@ test_suite:
         config:
           activation_type: "relu"
           input_shape: [8, 8, 4]        # [H, W, C]
-          data_range: [-100, 100]
+          data_range: [-128, 127]
           data_format: "INT8"

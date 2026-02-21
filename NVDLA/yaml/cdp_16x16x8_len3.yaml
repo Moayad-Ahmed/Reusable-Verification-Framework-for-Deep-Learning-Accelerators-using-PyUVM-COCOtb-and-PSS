@@ -1,0 +1,30 @@
+# CDP: 16x16 spatial, 8 channels, LEN3 -- maximum spatial size for 8ch in 4KB DRAM
+# Memory: input=2048B, output_base=2048, total=4096B (exactly fills DRAM)
+
+test_suite:
+  - name: "NVDLA_CDP_16x16x8_LEN3"
+    description: "16x16x8 INT8 LRN, LEN3, max spatial for 8ch"
+
+    layers:
+      - type: "normalization"
+        config:
+          input_shape: [16, 16, 8]
+          data_range: [-5, 5]
+          data_format: "INT8"
+
+          normalz_len: 3
+
+          k: 1.0
+          alpha: 0.0001
+          beta: 0.75
+
+          datin_offset: 0
+          datin_scale: 1
+          datin_shifter: 0
+
+          datout_offset: 0
+          datout_scale: 1
+          datout_shifter: 8
+
+          lut_le_function: "LINEAR"
+          lut_priority: "LE"

@@ -1,0 +1,30 @@
+# CDP: 8x4 spatial (non-square), 16 channels, LEN7 (first test of LEN7)
+# Memory: input=1024B, output_base=1024, total=2048B
+
+test_suite:
+  - name: "NVDLA_CDP_8x4x16_LEN7"
+    description: "8x4x16 INT8 LRN, LEN7, non-square spatial, 16ch"
+
+    layers:
+      - type: "normalization"
+        config:
+          input_shape: [8, 4, 16]
+          data_range: [-5, 5]
+          data_format: "INT8"
+
+          normalz_len: 7
+
+          k: 1.0
+          alpha: 0.0001
+          beta: 0.75
+
+          datin_offset: 0
+          datin_scale: 1
+          datin_shifter: 0
+
+          datout_offset: 0
+          datout_scale: 1
+          datout_shifter: 8
+
+          lut_le_function: "LINEAR"
+          lut_priority: "LE"

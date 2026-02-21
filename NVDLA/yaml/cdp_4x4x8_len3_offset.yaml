@@ -1,0 +1,32 @@
+# CDP: 4x4 spatial, 8 channels, LEN3, with datout_offset=5
+# Tests the output conversion offset subtraction path
+# Memory: input=128B, output_base=256, total=384B
+
+test_suite:
+  - name: "NVDLA_CDP_4x4x8_LEN3_offset"
+    description: "4x4x8 INT8 LRN, LEN3, datout_offset=5"
+
+    layers:
+      - type: "normalization"
+        config:
+          input_shape: [4, 4, 8]
+          data_range: [-5, 5]
+          data_format: "INT8"
+
+          normalz_len: 3
+
+          k: 1.0
+          alpha: 0.0001
+          beta: 0.75
+
+          datin_offset: 0
+          datin_scale: 1
+          datin_shifter: 0
+
+          # Non-zero datout_offset: hardware subtracts offset before scale/shift
+          datout_offset: 5
+          datout_scale: 1
+          datout_shifter: 8
+
+          lut_le_function: "LINEAR"
+          lut_priority: "LE"

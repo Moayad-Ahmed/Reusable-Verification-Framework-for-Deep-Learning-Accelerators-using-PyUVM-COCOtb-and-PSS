@@ -21,8 +21,8 @@ test_suite:
       - type: "activation"
         config:
           activation_type: "prelu"
-          input_shape: [4, 4]
-          data_range: [-80, 80]
+          input_shape: [3, 3]
+          data_range: [-128, 127]
           data_format: "INT8"
 
           # PReLU parameters

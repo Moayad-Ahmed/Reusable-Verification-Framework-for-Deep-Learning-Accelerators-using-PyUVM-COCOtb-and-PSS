@@ -1,0 +1,31 @@
+# CDP: 2x2 spatial, 32 channels (4 surfaces), LEN9 (max window)
+# Stress-tests multi-surface with maximum normalization window
+# Memory: input=512B, output_base=512, total=1024B
+
+test_suite:
+  - name: "NVDLA_CDP_2x2x32_LEN9"
+    description: "2x2x32 INT8 LRN, LEN9, 32 channels (4 surfaces)"
+
+    layers:
+      - type: "normalization"
+        config:
+          input_shape: [2, 2, 32]
+          data_range: [-5, 5]
+          data_format: "INT8"
+
+          normalz_len: 9
+
+          k: 1.0
+          alpha: 0.0001
+          beta: 0.75
+
+          datin_offset: 0
+          datin_scale: 1
+          datin_shifter: 0
+
+          datout_offset: 0
+          datout_scale: 1
+          datout_shifter: 8
+
+          lut_le_function: "LINEAR"
+          lut_priority: "LE"

@@ -1,0 +1,30 @@
+# CDP: 8x8 spatial, 8 channels, LEN5 -- stronger normalization (k=2, alpha=0.001)
+# Memory: input=512B, output_base=512, total=1024B
+
+test_suite:
+  - name: "NVDLA_CDP_8x8x8_LEN5_kalpha"
+    description: "8x8x8 INT8 LRN, LEN5, k=2 alpha=0.001 stronger normalization"
+
+    layers:
+      - type: "normalization"
+        config:
+          input_shape: [8, 8, 8]
+          data_range: [-5, 5]
+          data_format: "INT8"
+
+          normalz_len: 5
+
+          k: 2.0
+          alpha: 0.001
+          beta: 0.75
+
+          datin_offset: 0
+          datin_scale: 1
+          datin_shifter: 0
+
+          datout_offset: 0
+          datout_scale: 1
+          datout_shifter: 8
+
+          lut_le_function: "LINEAR"
+          lut_priority: "LE"
