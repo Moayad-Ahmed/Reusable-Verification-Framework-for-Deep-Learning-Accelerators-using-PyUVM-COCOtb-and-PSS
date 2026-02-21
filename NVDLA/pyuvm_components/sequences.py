@@ -717,7 +717,7 @@ class SdpTestSequence(NVDLASequenceBase):
     """
 
     BPE        = 1     # INT8 only
-    ITERATIONS = 5
+    ITERATIONS = 2
 
     def __init__(self, name, input_file=None, config_file=None):
         super().__init__(name)

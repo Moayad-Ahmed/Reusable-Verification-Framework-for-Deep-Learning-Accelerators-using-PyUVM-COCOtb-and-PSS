@@ -661,16 +661,24 @@ class RegistrationConfigs:
                 le_table = ActivationStrategy.generate_le_lut_tanh(
                     frac_bits, x_min, x_max)
 
-            # Convert range to INT32 (Q0 fixed-point from float)
-            range_scale = 1 << frac_bits
-            le_start = int(round(x_min * range_scale)) & 0xFFFFFFFF
-            le_end   = int(round(x_max * range_scale)) & 0xFFFFFFFF
+            # LUT range in RAW INTEGER units matching the input data format.
+            # The hardware LUT compares the 32-bit sign-extended INT8 input
+            # directly against these start/end values.  They must NOT be
+            # Q-scaled — they are plain integers in the same domain as the
+            # input pixels (e.g. -128 .. 128 for full INT8 coverage).
+            import math
+            le_start = int(x_min) & 0xFFFFFFFF   # signed → unsigned 32-bit
+            le_end   = int(x_max) & 0xFFFFFFFF
             lo_start = le_start
             lo_end   = le_end
 
-            # LO index select: determines right-shift for linear indexing
-            # lo_index_select = floor(log2((range / 256))) in fixed-point terms
-            lo_idx_sel = max(0, frac_bits - 8)  # simplified
+            # LO index select: step = 2^lo_idx_sel, 256 intervals
+            # lo_idx_sel = floor(log2(range / 256)), minimum 0
+            lo_range = int(x_max) - int(x_min)            # e.g. 256
+            lo_idx_sel = max(0, int(math.log2(max(1, lo_range / 256))))
+
+            # LE index select: step = 2^le_idx_sel, 64 intervals
+            le_idx_sel = max(0, int(math.log2(max(1, lo_range / 64))))
 
             # Program LE table (65 entries, table_id=0)
             for i in range(65):
@@ -690,9 +698,11 @@ class RegistrationConfigs:
             # S_LUT_CFG: le_function=1(LINEAR), priorities=LO for all
             lut_regs.append((SDP_REG.S_LUT_CFG,
                              0x00000001 | (1 << 4) | (1 << 5) | (1 << 6)))
-            # S_LUT_INFO: le_index_select=7, lo_index_select
+            # S_LUT_INFO: le_index_offset[7:0], le_index_select[15:8],
+            #             lo_index_select[23:16]
             lut_regs.append((SDP_REG.S_LUT_INFO,
-                             (0 & 0xFF) | ((7 & 0xFF) << 8) |
+                             (0 & 0xFF) |
+                             ((le_idx_sel & 0xFF) << 8) |
                              ((lo_idx_sel & 0xFF) << 16)))
             # Ranges
             lut_regs.append((SDP_REG.S_LUT_LE_START, le_start))

@@ -13,10 +13,12 @@
 #   BS and BN stages are bypassed.
 #   EW stage uses a 257-entry LO LUT + 65-entry LE LUT with
 #   linear interpolation to approximate tanh.
-#   Input range mapped to [-4.0, 4.0] (tanh saturates beyond ±4).
+#   LUT covers the full INT8 input range [-128, 128] so that the
+#   hardware index calculation (integer subtraction + right-shift)
+#   produces valid table indices for every possible input value.
 #   LUT values stored as INT16 fixed-point (Q0.15, frac_bits=15).
 #
-# Output CVT: identity (offset=0, scale=1, shift=0)
+# Output CVT: shift-8 to scale Q0.15 LUT values down to INT8
 # ═══════════════════════════════════════════════════════════════════
 
 test_suite:
@@ -33,8 +35,8 @@ test_suite:
 
           # LUT parameters
           lut_frac_bits: 15
-          lut_range_min: -4.0
-          lut_range_max: 4.0
+          lut_range_min: -128
+          lut_range_max: 128
 
           # Output CVT — scale Q0.15 LUT values down to INT8
           # tanh range [-1,1] × 2^15 = [-32768,32768]
