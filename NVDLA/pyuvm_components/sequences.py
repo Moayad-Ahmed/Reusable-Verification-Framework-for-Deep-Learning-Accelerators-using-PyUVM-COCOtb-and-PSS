@@ -518,3 +518,152 @@ class FcTestSequence(NVDLASequenceBase):
             # ---- Wait for scoreboard to confirm check complete ----
             await bfm.iteration_done_queue.get()
             print(f"FC iteration {i} checked by scoreboard.")
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  CDP (NORMALIZATION / LRN) VIRTUAL SEQUENCE
+# ══════════════════════════════════════════════════════════════════════
+
+class CdpTestSequence(NVDLASequenceBase):
+    """
+    Virtual sequence for NVDLA CDP (Channel Data Processor / LRN) tests.
+
+    CDP performs Local Response Normalization across channels using a
+    LUT-based pipeline:  RDMA → CvtIn → SqSum → LUT → Mul → CvtOut → WDMA
+
+    Output dimensions are identical to input dimensions (LRN does not
+    change spatial or channel shapes).
+
+    Each iteration:
+        1. Generates random input and computes golden output via NVDLA
+           CDP pipeline model (compute_golden_nvdla)
+        2. Generates LRN LUT tables from (k, alpha, beta) parameters
+        3. Writes atom-padded surface-planar hex file to disk
+        4. Sends DataTransaction → DataAgent  (loads DRAM)
+        5. Sends CsbTransaction  → CsbAgent   (programs hardware + LUT)
+        6. Waits for scoreboard to signal iteration complete
+    """
+
+    BPE        = 1   # INT8 only
+    ITERATIONS = 2
+
+    def __init__(self, name, input_file=None, config_file=None):
+        super().__init__(name)
+        self.input_file  = input_file
+        self.config_file = config_file
+
+    def _input_to_hwc_bytes(self, input_data):
+        """
+        Convert CHW int8 array to NVDLA surface-planar byte list.
+
+        Within each surface (group of ATOM channels), data is stored
+        pixel-by-pixel, row-major.  Each pixel occupies one ATOM of
+        bytes with partial channels zero-padded.
+        """
+        C, H, W = input_data.shape
+        num_surfaces = max(1, (C * self.BPE + self.ATOM - 1) // self.ATOM)
+        buf = []
+        for s in range(num_surfaces):
+            c_start = s * self.ATOM
+            c_end   = min(c_start + self.ATOM, C)
+            for h in range(H):
+                for w in range(W):
+                    for c in range(c_start, c_end):
+                        buf.append(int(input_data[c, h, w]) & 0xFF)
+                    # Pad to full atom
+                    buf.extend([0] * (self.ATOM - (c_end - c_start)))
+        return buf
+
+    async def body(self):
+        from strategy.normalization_strategy import NormalizationStrategy
+
+        strategy = LayerFactory.create_strategy('normalization')
+        reg_cfg  = RegistrationConfigs()
+        config   = self.load_yaml_config()
+        bfm      = NvdlaBFM()
+
+        # ---- Extract dimensions ----
+        input_shape = config['input_shape']
+        if len(input_shape) == 3:
+            in_h, in_w, channels = input_shape
+        else:
+            in_h, in_w = input_shape
+            channels = config.get('num_channels', 1)
+        config.setdefault('num_channels', channels)
+
+        # ---- Memory layout ----
+        atoms_per_pixel = max(1, (channels * self.BPE + self.ATOM - 1) // self.ATOM)
+        pixel_bytes     = atoms_per_pixel * self.ATOM
+        num_surfaces    = atoms_per_pixel   # same value
+        line_stride     = in_w * pixel_bytes
+        surface_stride  = line_stride * in_h
+        input_total     = num_surfaces * surface_stride
+
+        # ---- Generate LUT tables from LRN formula parameters ----
+        k     = config.get('k', 1.0)
+        alpha = config.get('alpha', 1e-4)
+        beta  = config.get('beta', 0.75)
+        normalz_len = config['normalz_len']
+
+        le_table, le_start, le_end, le_idx_sel = NormalizationStrategy.generate_lrn_lut(
+            k, alpha, beta, normalz_len, num_entries=65
+        )
+        lo_table, lo_start, lo_end, lo_idx_sel = NormalizationStrategy.generate_lrn_lut(
+            k, alpha, beta, normalz_len, num_entries=257
+        )
+
+        # Enrich config with LUT data (used by golden model AND reg config)
+        config['lut_le_table'] = le_table
+        config['lut_lo_table'] = lo_table
+        config['lut_le_start'] = le_start
+        config['lut_le_end']   = le_end
+        config['lut_lo_start'] = lo_start
+        config['lut_lo_end']   = lo_end
+        config['lut_le_index_select'] = le_idx_sel
+        config['lut_lo_index_select'] = lo_idx_sel
+
+        output_base = self.align_to_256(input_total)
+
+        for i in range(self.ITERATIONS):
+            # ---- Generate stimulus ----
+            input_data      = strategy.generate_input_data(config)
+            expected_output = strategy.compute_golden_nvdla(input_data, config)
+
+            # ---- Write input hex file (surface-planar, atom-padded) ----
+            input_bytes = self._input_to_hwc_bytes(input_data)
+            self.write_hex_file(self.input_file, input_bytes)
+
+            # ---- Build expected byte list (HWC pixel order) ----
+            C, H, W = expected_output.shape
+            expected_list = []
+            for h in range(H):
+                for w in range(W):
+                    for c in range(C):
+                        expected_list.append(int(expected_output[c, h, w]) & 0xFF)
+
+            # ---- Build DataTransaction (no weights for CDP) ----
+            data_tx = DataTransaction(f"cdp_data_tx_{i}", strategy)
+            data_tx.input_file      = self.input_file
+            data_tx.input_base_addr = 0
+
+            # ---- Build CsbTransaction ----
+            csb_tx = CsbTransaction(f"cdp_csb_tx_{i}", strategy)
+            csb_tx.reg_configs = reg_cfg.normalization_configs(
+                config, src_addr=0, dst_addr=output_base
+            )
+            csb_tx.output_base_addr            = output_base
+            csb_tx.output_num_pixels           = in_h * in_w
+            csb_tx.output_pixel_bytes          = pixel_bytes
+            csb_tx.output_data_bytes_per_pixel = channels * self.BPE
+            csb_tx.expected_output_data        = expected_list
+
+            # ---- Dispatch: data first, then CSB ----
+            data_sub = DataSubSequence(f"cdp_data_sub_{i}", data_tx)
+            await data_sub.start(self.sequencer.data_sqr)
+
+            csb_sub = CsbSubSequence(f"cdp_csb_sub_{i}", csb_tx)
+            await csb_sub.start(self.sequencer.csb_sqr)
+
+            # ---- Wait for scoreboard to confirm check complete ----
+            await bfm.iteration_done_queue.get()
+            print(f"CDP iteration {i} checked by scoreboard.")

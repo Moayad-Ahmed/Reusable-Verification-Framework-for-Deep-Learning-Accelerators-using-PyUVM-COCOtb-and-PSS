@@ -1,12 +1,14 @@
 from strategy.pooling_strategy import PoolingStrategy
 from strategy.convolution_strategy import ConvolutionStrategy
 from strategy.fc_strategy import FullyConnectedStrategy
+from strategy.normalization_strategy import NormalizationStrategy
 
 class LayerFactory:
     _strategies = {
         'pooling': PoolingStrategy,
         'convolution': ConvolutionStrategy,
         'fully_connected': FullyConnectedStrategy,
+        'normalization': NormalizationStrategy,
     }
     
     @classmethod

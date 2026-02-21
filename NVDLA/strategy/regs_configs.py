@@ -1,6 +1,7 @@
 import math
 from strategy.Layers_regs_addresses import PDP_REG
 from strategy.Layers_regs_addresses import PDP_RDMA_REG
+from strategy.Layers_regs_addresses import CDP_REG, CDP_RDMA_REG
 from strategy.Layers_regs_addresses import (
     GLB_REG, CDMA_REG, CSC_REG, CMAC_A_REG, CMAC_B_REG, CACC_REG, SDP_REG
 )
@@ -516,8 +517,236 @@ class RegistrationConfigs:
     def activation_configs(self):
         pass
 
-    def normalization_configs(self):
-        pass
+    def normalization_configs(self, layer_configs, src_addr=0x0, dst_addr=0x100):
+        """
+        Build CDP + CDP_RDMA register list from a YAML layer config dict.
+
+        CDP performs Local Response Normalization (LRN).  Output dimensions
+        are identical to input dimensions (no spatial / channel reduction).
+
+        The LUT is programmed first (LE: 65 entries, LO: 257 entries), then
+        the RDMA and CDP core D_ registers.  Enable order: RDMA first, CDP last.
+
+        Expected keys in layer_configs:
+            input_shape       : [H, W, C] or [H, W]
+            normalz_len       : int (3, 5, 7, or 9)
+            data_format       : str  ('INT8')                   default 'INT8'
+            datin_offset      : int  (signed)                   default 0
+            datin_scale       : int  (signed 16-bit)            default 1
+            datin_shifter     : int  (unsigned 0-31)            default 0
+            datout_offset     : int  (signed 32-bit)            default 0
+            datout_scale      : int  (signed 16-bit)            default 1
+            datout_shifter    : int  (unsigned 0-63)            default 0
+            sqsum_bypass      : bool                            default False
+            mul_bypass        : bool                            default False
+            lut_le_table      : list[int]  65 signed-16 values  default identity
+            lut_lo_table      : list[int] 257 signed-16 values  default identity
+            lut_le_start / lut_le_end                           default 0 / 0xFFFF
+            lut_lo_start / lut_lo_end                           default 0 / 0xFFFF
+            lut_le_function   : 'EXPONENT' | 'LINEAR'          default 'LINEAR'
+            lut_le_index_offset / lut_le_index_select / lut_lo_index_select
+            lut_priority      : 'LE' | 'LO'                    default 'LE'
+            lut_*_slope_*_scale / shift                         default 0
+
+        Args:
+            layer_configs : dict with keys listed above
+            src_addr      : source DRAM base address (input data)
+            dst_addr      : destination DRAM base address (output data)
+        """
+        # ---------- extract config values ----------
+        input_shape = layer_configs['input_shape']
+        in_h = input_shape[0]
+        in_w = input_shape[1]
+        channels = (input_shape[2] if len(input_shape) == 3
+                    else layer_configs.get('num_channels', 1))
+
+        normalz_len = layer_configs['normalz_len']
+        data_fmt    = layer_configs.get('data_format', 'INT8')
+
+        # Normalization-length encoding: 3→0, 5→1, 7→2, 9→3
+        _NORMALZ_ENC = {3: 0, 5: 1, 7: 2, 9: 3}
+        normalz_enc = _NORMALZ_ENC[normalz_len]
+
+        # Data conversion params
+        datin_offset   = layer_configs.get('datin_offset', 0)
+        datin_scale    = layer_configs.get('datin_scale', 1)
+        datin_shifter  = layer_configs.get('datin_shifter', 0)
+        datout_offset  = layer_configs.get('datout_offset', 0)
+        datout_scale   = layer_configs.get('datout_scale', 1)
+        datout_shifter = layer_configs.get('datout_shifter', 0)
+
+        # Bypass flags
+        sqsum_bypass = 1 if layer_configs.get('sqsum_bypass', False) else 0
+        mul_bypass   = 1 if layer_configs.get('mul_bypass', False) else 0
+        func_bypass  = sqsum_bypass | (mul_bypass << 1)
+
+        # ---------- LUT tables (default: identity = 256 → 1.0 in Q8.8) ----------
+        lut_le_table = layer_configs.get('lut_le_table', [256] * 65)
+        lut_lo_table = layer_configs.get('lut_lo_table', [256] * 257)
+
+        lut_le_start = layer_configs.get('lut_le_start', 0)
+        lut_le_end   = layer_configs.get('lut_le_end', 0xFFFF)
+        lut_lo_start = layer_configs.get('lut_lo_start', 0)
+        lut_lo_end   = layer_configs.get('lut_lo_end', 0xFFFF)
+
+        # LUT configuration register
+        lut_le_function = layer_configs.get('lut_le_function', 'LINEAR')
+        le_func_enc  = 1 if lut_le_function == 'LINEAR' else 0
+        lut_priority = layer_configs.get('lut_priority', 'LE')
+        pri_lo       = 1 if lut_priority == 'LO' else 0
+        lut_cfg = (le_func_enc
+                   | (pri_lo << 4)      # uflow priority
+                   | (pri_lo << 5)      # oflow priority
+                   | (pri_lo << 6))     # hybrid priority
+
+        # LUT info register — index_select controls the segment size (2^select)
+        # for LINEAR mode index computation: index = (x - start) >> select
+        le_idx_offset = layer_configs.get('lut_le_index_offset', 0) & 0xFF
+        le_idx_select = layer_configs.get('lut_le_index_select', 0) & 0xFF
+        lo_idx_select = layer_configs.get('lut_lo_index_select', 0) & 0xFF
+        lut_info = le_idx_offset | (le_idx_select << 8) | (lo_idx_select << 16)
+
+        # LUT slope registers
+        le_uflow_scale = layer_configs.get('lut_le_slope_uflow_scale', 0) & 0xFFFF
+        le_oflow_scale = layer_configs.get('lut_le_slope_oflow_scale', 0) & 0xFFFF
+        le_slope_scale = le_uflow_scale | (le_oflow_scale << 16)
+        le_uflow_shift = layer_configs.get('lut_le_slope_uflow_shift', 0) & 0x1F
+        le_oflow_shift = layer_configs.get('lut_le_slope_oflow_shift', 0) & 0x1F
+        le_slope_shift = le_uflow_shift | (le_oflow_shift << 5)
+
+        lo_uflow_scale = layer_configs.get('lut_lo_slope_uflow_scale', 0) & 0xFFFF
+        lo_oflow_scale = layer_configs.get('lut_lo_slope_oflow_scale', 0) & 0xFFFF
+        lo_slope_scale = lo_uflow_scale | (lo_oflow_scale << 16)
+        lo_uflow_shift = layer_configs.get('lut_lo_slope_uflow_shift', 0) & 0x1F
+        lo_oflow_shift = layer_configs.get('lut_lo_slope_oflow_shift', 0) & 0x1F
+        lo_slope_shift = lo_uflow_shift | (lo_oflow_shift << 5)
+
+        # ---------- memory layout ----------
+        bpe  = _BYTES_PER_EL.get(data_fmt, 1)
+        ATOM = 8
+
+        # Per-pixel: one atom holds atomic_m channels (INT8: 8 ch per atom)
+        atoms_per_pixel = max(1, (channels * bpe + ATOM - 1) // ATOM)
+        pixel_bytes     = atoms_per_pixel * ATOM
+
+        # CDP output dimensions == input dimensions
+        line_stride    = in_w * pixel_bytes
+        surface_stride = line_stride * in_h
+
+        # Data format encoding
+        fmt_enc = _DATA_FMT[data_fmt]
+
+        # Source / destination base addresses
+        src_lo, src_hi = self._split_addr(src_addr)
+        dst_lo, dst_hi = self._split_addr(dst_addr)
+
+        # Register-width masking for data conversion fields
+        datin_offset_reg   = datin_offset  & 0xFFFF
+        datin_scale_reg    = datin_scale   & 0xFFFF
+        datin_shifter_reg  = datin_shifter & 0x1F
+        datout_offset_reg  = datout_offset & 0xFFFFFFFF
+        datout_scale_reg   = datout_scale  & 0xFFFF
+        datout_shifter_reg = datout_shifter & 0x3F
+
+        # ========================= BUILD REGISTER LIST =========================
+        regs = []
+
+        # -------- CDP CORE: Status / Pointer --------
+        regs.append((CDP_REG.S_STATUS,  0x00000000))
+        regs.append((CDP_REG.S_POINTER, 0x00000000))   # Group 0
+
+        # -------- CDP CORE: LUT Programming (S_ regs, NOT dual-grouped) --------
+        # Write LE table (65 entries): table=LE(0), type=WRITE(1), addr=0
+        regs.append((CDP_REG.S_LUT_ACCESS_CFG, 0x20000))   # (1<<17)|(0<<16)|0
+        for entry in lut_le_table:
+            regs.append((CDP_REG.S_LUT_ACCESS_DATA, entry & 0xFFFF))
+
+        # Write LO table (257 entries): table=LO(1), type=WRITE(1), addr=0
+        regs.append((CDP_REG.S_LUT_ACCESS_CFG, 0x30000))   # (1<<17)|(1<<16)|0
+        for entry in lut_lo_table:
+            regs.append((CDP_REG.S_LUT_ACCESS_DATA, entry & 0xFFFF))
+
+        # -------- CDP CORE: LUT Configuration --------
+        regs.append((CDP_REG.S_LUT_CFG,  lut_cfg))
+        regs.append((CDP_REG.S_LUT_INFO, lut_info))
+
+        # LE table range (38-bit signed, split low/high)
+        regs.append((CDP_REG.S_LUT_LE_START_LOW,  lut_le_start & 0xFFFFFFFF))
+        regs.append((CDP_REG.S_LUT_LE_START_HIGH, (lut_le_start >> 32) & 0x3F))
+        regs.append((CDP_REG.S_LUT_LE_END_LOW,    lut_le_end   & 0xFFFFFFFF))
+        regs.append((CDP_REG.S_LUT_LE_END_HIGH,   (lut_le_end  >> 32) & 0x3F))
+
+        # LO table range
+        regs.append((CDP_REG.S_LUT_LO_START_LOW,  lut_lo_start & 0xFFFFFFFF))
+        regs.append((CDP_REG.S_LUT_LO_START_HIGH, (lut_lo_start >> 32) & 0x3F))
+        regs.append((CDP_REG.S_LUT_LO_END_LOW,    lut_lo_end   & 0xFFFFFFFF))
+        regs.append((CDP_REG.S_LUT_LO_END_HIGH,   (lut_lo_end  >> 32) & 0x3F))
+
+        # Slope registers
+        regs.append((CDP_REG.S_LUT_LE_SLOPE_SCALE, le_slope_scale))
+        regs.append((CDP_REG.S_LUT_LE_SLOPE_SHIFT, le_slope_shift))
+        regs.append((CDP_REG.S_LUT_LO_SLOPE_SCALE, lo_slope_scale))
+        regs.append((CDP_REG.S_LUT_LO_SLOPE_SHIFT, lo_slope_shift))
+
+        # -------- CDP CORE: D_ registers --------
+        regs.append((CDP_REG.D_FUNC_BYPASS, func_bypass))
+
+        # Destination memory
+        regs.append((CDP_REG.D_DST_BASE_ADDR_LOW,  dst_lo))
+        regs.append((CDP_REG.D_DST_BASE_ADDR_HIGH, dst_hi))
+        regs.append((CDP_REG.D_DST_LINE_STRIDE,    line_stride))
+        regs.append((CDP_REG.D_DST_SURFACE_STRIDE, surface_stride))
+        regs.append((CDP_REG.D_DST_DMA_CFG,        0x00000001))   # MC
+
+        # Data format (MUST match RDMA — C5) and NaN handling
+        regs.append((CDP_REG.D_DATA_FORMAT,        fmt_enc))
+        regs.append((CDP_REG.D_NAN_FLUSH_TO_ZERO,  0x00000000))
+
+        # LRN normalization length
+        regs.append((CDP_REG.D_LRN_CFG, normalz_enc))
+
+        # Input data conversion
+        regs.append((CDP_REG.D_DATIN_OFFSET,  datin_offset_reg))
+        regs.append((CDP_REG.D_DATIN_SCALE,   datin_scale_reg))
+        regs.append((CDP_REG.D_DATIN_SHIFTER, datin_shifter_reg))
+
+        # Output data conversion
+        regs.append((CDP_REG.D_DATOUT_OFFSET,  datout_offset_reg))
+        regs.append((CDP_REG.D_DATOUT_SCALE,   datout_scale_reg))
+        regs.append((CDP_REG.D_DATOUT_SHIFTER, datout_shifter_reg))
+
+        # Performance / Debug
+        regs.append((CDP_REG.D_PERF_ENABLE, 0x00000000))
+        regs.append((CDP_REG.D_CYA,         0x00000000))
+
+        # ======== CDP RDMA: Status / Pointer ========
+        regs.append((CDP_RDMA_REG.S_STATUS,  0x00000000))
+        regs.append((CDP_RDMA_REG.S_POINTER, 0x00000000))   # Group 0
+
+        # ======== CDP RDMA: Data Cube Dimensions (value-1 encoding) ========
+        regs.append((CDP_RDMA_REG.D_DATA_CUBE_WIDTH,   in_w     - 1))
+        regs.append((CDP_RDMA_REG.D_DATA_CUBE_HEIGHT,  in_h     - 1))
+        regs.append((CDP_RDMA_REG.D_DATA_CUBE_CHANNEL, channels - 1))
+
+        # ======== CDP RDMA: Source Memory ========
+        regs.append((CDP_RDMA_REG.D_SRC_BASE_ADDR_LOW,  src_lo))
+        regs.append((CDP_RDMA_REG.D_SRC_BASE_ADDR_HIGH, src_hi))
+        regs.append((CDP_RDMA_REG.D_SRC_LINE_STRIDE,    line_stride))
+        regs.append((CDP_RDMA_REG.D_SRC_SURFACE_STRIDE, surface_stride))
+        regs.append((CDP_RDMA_REG.D_SRC_DMA_CFG,        0x00000001))   # MC
+
+        # ======== CDP RDMA: Data Format ========
+        regs.append((CDP_RDMA_REG.D_DATA_FORMAT, fmt_enc))
+
+        # ======== CDP RDMA: Performance / Debug ========
+        regs.append((CDP_RDMA_REG.D_PERF_ENABLE, 0x00000000))
+        regs.append((CDP_RDMA_REG.D_CYA,         0x00000000))
+
+        # ======== ENABLE (RDMA first, then CDP — C14) ========
+        regs.append((CDP_RDMA_REG.D_OP_ENABLE, 0x00000001))
+        regs.append((CDP_REG.D_OP_ENABLE,      0x00000001))
+
+        return regs
 
     def regularization_configs(self):
         pass

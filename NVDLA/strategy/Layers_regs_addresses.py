@@ -238,6 +238,92 @@ class SDP_REG:
 #  POOLING PIPELINE REGISTERS (existing)
 # ═══════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════
+#  CDP (CHANNEL DATA PROCESSOR) REGISTERS — LRN / Normalization
+#  Pipeline: CDP_RDMA → CvtIn → SqSum → LUT → Mul → CvtOut → WDMA
+# ═══════════════════════════════════════════════════════════════════════
+
+# CDP RDMA Registers (Base: 0x3000 = byte 0xC000)
+class CDP_RDMA_REG:
+    """CDP Read DMA — fetches input data cube from memory for CDP."""
+    BASE = 0x3000
+    S_STATUS              = BASE + 0x00   # 0x3000
+    S_POINTER             = BASE + 0x01   # 0x3001
+    D_OP_ENABLE           = BASE + 0x02   # 0x3002
+    D_DATA_CUBE_WIDTH     = BASE + 0x03   # 0x3003  [12:0]=W-1
+    D_DATA_CUBE_HEIGHT    = BASE + 0x04   # 0x3004  [12:0]=H-1
+    D_DATA_CUBE_CHANNEL   = BASE + 0x05   # 0x3005  [12:0]=C-1
+    D_SRC_BASE_ADDR_LOW   = BASE + 0x06   # 0x3006
+    D_SRC_BASE_ADDR_HIGH  = BASE + 0x07   # 0x3007
+    D_SRC_LINE_STRIDE     = BASE + 0x08   # 0x3008
+    D_SRC_SURFACE_STRIDE  = BASE + 0x09   # 0x3009
+    D_SRC_DMA_CFG         = BASE + 0x0A   # 0x300A  [0]=ram_type (0=CV,1=MC)
+    D_SRC_COMPRESSION_EN  = BASE + 0x0B   # 0x300B  (RO, always 0)
+    D_OPERATION_MODE      = BASE + 0x0C   # 0x300C  (RO)
+    D_DATA_FORMAT         = BASE + 0x0D   # 0x300D  [1:0]=input_data
+    D_PERF_ENABLE         = BASE + 0x0E   # 0x300E
+    D_PERF_READ_STALL     = BASE + 0x0F   # 0x300F  (RO)
+    D_CYA                 = BASE + 0x10   # 0x3010
+
+
+# CDP Core Registers (Base: 0x3400 = byte 0xD000)
+class CDP_REG:
+    """CDP Core — LUT-based normalization (LRN) engine."""
+    BASE = 0x3400
+    # Status / Control
+    S_STATUS              = BASE + 0x00   # 0x3400
+    S_POINTER             = BASE + 0x01   # 0x3401
+    # LUT Access (shared, NOT dual-grouped)
+    S_LUT_ACCESS_CFG      = BASE + 0x02   # 0x3402  [9:0]=addr [16]=table [17]=rw
+    S_LUT_ACCESS_DATA     = BASE + 0x03   # 0x3403  [15:0]=data
+    S_LUT_CFG             = BASE + 0x04   # 0x3404  [0]=le_func [4]=uflow [5]=oflow [6]=hybrid
+    S_LUT_INFO            = BASE + 0x05   # 0x3405  [7:0]=le_idx_offset [15:8]=le_idx_sel [23:16]=lo_idx_sel
+    S_LUT_LE_START_LOW    = BASE + 0x06   # 0x3406
+    S_LUT_LE_START_HIGH   = BASE + 0x07   # 0x3407  [5:0]
+    S_LUT_LE_END_LOW      = BASE + 0x08   # 0x3408
+    S_LUT_LE_END_HIGH     = BASE + 0x09   # 0x3409  [5:0]
+    S_LUT_LO_START_LOW    = BASE + 0x0A   # 0x340A
+    S_LUT_LO_START_HIGH   = BASE + 0x0B   # 0x340B  [5:0]
+    S_LUT_LO_END_LOW      = BASE + 0x0C   # 0x340C
+    S_LUT_LO_END_HIGH     = BASE + 0x0D   # 0x340D  [5:0]
+    S_LUT_LE_SLOPE_SCALE  = BASE + 0x0E   # 0x340E  [15:0]=uflow [31:16]=oflow
+    S_LUT_LE_SLOPE_SHIFT  = BASE + 0x0F   # 0x340F  [4:0]=uflow [9:5]=oflow
+    S_LUT_LO_SLOPE_SCALE  = BASE + 0x10   # 0x3410  [15:0]=uflow [31:16]=oflow
+    S_LUT_LO_SLOPE_SHIFT  = BASE + 0x11   # 0x3411  [4:0]=uflow [9:5]=oflow
+    # Dual-grouped D_ registers
+    D_OP_ENABLE           = BASE + 0x12   # 0x3412
+    D_FUNC_BYPASS         = BASE + 0x13   # 0x3413  [0]=sqsum_bypass [1]=mul_bypass
+    D_DST_BASE_ADDR_LOW   = BASE + 0x14   # 0x3414
+    D_DST_BASE_ADDR_HIGH  = BASE + 0x15   # 0x3415
+    D_DST_LINE_STRIDE     = BASE + 0x16   # 0x3416
+    D_DST_SURFACE_STRIDE  = BASE + 0x17   # 0x3417
+    D_DST_DMA_CFG         = BASE + 0x18   # 0x3418  [0]=ram_type
+    D_DST_COMPRESSION_EN  = BASE + 0x19   # 0x3419  (RO, always 0)
+    D_DATA_FORMAT         = BASE + 0x1A   # 0x341A  [1:0]=input_data_type
+    D_NAN_FLUSH_TO_ZERO   = BASE + 0x1B   # 0x341B  [0]=nan_to_zero
+    D_LRN_CFG             = BASE + 0x1C   # 0x341C  [1:0]=normalz_len
+    D_DATIN_OFFSET        = BASE + 0x1D   # 0x341D  [15:0]=signed offset
+    D_DATIN_SCALE         = BASE + 0x1E   # 0x341E  [15:0]=signed scale
+    D_DATIN_SHIFTER       = BASE + 0x1F   # 0x341F  [4:0]=unsigned shifter
+    D_DATOUT_OFFSET       = BASE + 0x20   # 0x3420  [31:0]=signed offset
+    D_DATOUT_SCALE        = BASE + 0x21   # 0x3421  [15:0]=signed scale
+    D_DATOUT_SHIFTER      = BASE + 0x22   # 0x3422  [5:0]=unsigned shifter
+    # Status counters (RO)
+    D_NAN_INPUT_NUM       = BASE + 0x23   # 0x3423
+    D_INF_INPUT_NUM       = BASE + 0x24   # 0x3424
+    D_NAN_OUTPUT_NUM      = BASE + 0x25   # 0x3425
+    D_OUT_SATURATION      = BASE + 0x26   # 0x3426
+    # Performance counters
+    D_PERF_ENABLE         = BASE + 0x27   # 0x3427  [0]=dma_en [1]=lut_en
+    D_PERF_WRITE_STALL    = BASE + 0x28   # 0x3428  (RO)
+    D_PERF_LUT_UFLOW      = BASE + 0x29   # 0x3429  (RO)
+    D_PERF_LUT_OFLOW      = BASE + 0x2A   # 0x342A  (RO)
+    D_PERF_LUT_HYBRID     = BASE + 0x2B   # 0x342B  (RO)
+    D_PERF_LUT_LE_HIT     = BASE + 0x2C   # 0x342C  (RO)
+    D_PERF_LUT_LO_HIT     = BASE + 0x2D   # 0x342D  (RO)
+    D_CYA                 = BASE + 0x2E   # 0x342E
+
+
 # PDP Core Registers (Base: 0x2C00)
 class PDP_REG:
     """PDP (Planar Data Processor) Register Addresses"""

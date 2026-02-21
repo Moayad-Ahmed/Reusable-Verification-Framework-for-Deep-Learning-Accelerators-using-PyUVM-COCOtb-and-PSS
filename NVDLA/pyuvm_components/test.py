@@ -9,6 +9,7 @@ from pyuvm_components.sequences import (
     PdpTestSequence,
     ConvTestSequence,
     FcTestSequence,
+    CdpTestSequence,
 )
 import os
 
@@ -25,9 +26,9 @@ def config_file_path(filename):
     return os.path.join(CONFIG_DIR, filename)
 
 
-# ══════════════════════════════════════════════════════════════════════
+# ======================================================================
 #  BASE TEST
-# ══════════════════════════════════════════════════════════════════════
+# ======================================================================
 
 class NVDLATestBase(uvm_test):
     """
@@ -84,9 +85,9 @@ class NVDLATestBase(uvm_test):
         self.drop_objection()
 
 
-# ══════════════════════════════════════════════════════════════════════
+# ======================================================================
 #  PDP BASE
-# ══════════════════════════════════════════════════════════════════════
+# ======================================================================
 
 class PdpTestBase(NVDLATestBase):
     """Base class for all PDP pooling tests."""
@@ -99,11 +100,10 @@ class PdpTestBase(NVDLATestBase):
         )
 
 
-# ── Concrete PDP tests ─────────────────────────────────────────────
-
+# -- Concrete PDP tests --------------------------------------------------
 @pyuvm.test()
 class PdpBasicTest(PdpTestBase):
-    """Default pooling test — nvdla_pooling_config.yaml"""
+    """Default pooling test - nvdla_pooling_config.yaml"""
     YAML_FILE = "nvdla_pooling_config.yaml"
     DAT_FILE  = "pdp_default_in.dat"
 
@@ -170,10 +170,9 @@ class Pdp_4x4_max_k2_s2_4ch(PdpTestBase):
     YAML_FILE = "4x4_max_k2_s2_4ch.yaml"
     DAT_FILE  = "pdp_4x4_max_k2_s2_4ch_in.dat"
 
-
-# ══════════════════════════════════════════════════════════════════════
+# ======================================================================
 #  CONV BASE
-# ══════════════════════════════════════════════════════════════════════
+# ======================================================================
 
 class ConvTestBase(NVDLATestBase):
     """
@@ -193,11 +192,11 @@ class ConvTestBase(NVDLATestBase):
         )
 
 
-# ── Concrete convolution tests ────────────────────────────────────────
+# -- Concrete convolution tests ---------------------------------------------
 
 @pyuvm.test()
 class Conv_DC_1x1x8_k1(ConvTestBase):
-    """1×1 DC conv: 8 input channels, 1 kernel, no truncation"""
+    """1x1 DC conv: 8 input channels, 1 kernel, no truncation"""
     YAML_FILE = "dc_1x1x8_k1_simple.yaml"
     DAT_FILE  = "conv_1x1x8_k1_in.dat"
     WT_FILE   = "conv_1x1x8_k1_wt.dat"
@@ -205,21 +204,20 @@ class Conv_DC_1x1x8_k1(ConvTestBase):
 
 @pyuvm.test()
 class Conv_DC_2x1x8_k1(ConvTestBase):
-    """2×1 DC conv: 8 input channels, 1 kernel, no truncation"""
+    """2x1 DC conv: 8 input channels, 1 kernel, no truncation"""
     YAML_FILE = "dc_2x1x8_k1_simple.yaml"
     DAT_FILE  = "conv_2x1x8_k1_in.dat"
     WT_FILE   = "conv_2x1x8_k1_wt.dat"
 
-
-# ══════════════════════════════════════════════════════════════════════
+# ======================================================================
 #  FC (FULLY-CONNECTED) BASE
-# ══════════════════════════════════════════════════════════════════════
+# ======================================================================
 
 class FcTestBase(NVDLATestBase):
     """
     Base class for all NVDLA fully-connected tests.
 
-    FC layers are mapped to the convolution pipeline as 1×1 convolutions:
+    FC layers are mapped to the convolution pipeline as 1x1 convolutions:
         CDMA -> CSC -> CMAC_A/B -> CACC -> SDP (passthrough) -> DRAM
     """
     WT_FILE = None
@@ -233,8 +231,7 @@ class FcTestBase(NVDLATestBase):
         )
 
 
-# ── Concrete FC tests ──────────────────────────────────────────────
-
+# -- Concrete FC tests ------------------------------------------------------
 
 @pyuvm.test()
 class FC_16in_8out(FcTestBase):
@@ -257,3 +254,45 @@ class FC_8in_1out(FcTestBase):
     YAML_FILE = "fc_8in_1out_simple.yaml"
     DAT_FILE  = "fc_8in_1out_in.dat"
     WT_FILE   = "fc_8in_1out_wt.dat"
+
+# ======================================================================
+#  CDP (NORMALIZATION / LRN) BASE
+# ======================================================================
+
+class CdpTestBase(NVDLATestBase):
+    """
+    Base class for all NVDLA CDP normalization / LRN tests.
+
+    CDP pipeline: CDP_RDMA -> CvtIn -> SqSum -> LUT -> Mul -> CvtOut -> WDMA
+    Output dimensions are identical to input (no spatial change).
+    """
+
+    def _create_sequence(self):
+        return CdpTestSequence(
+            "cdp_test",
+            input_file=input_file_path(self.DAT_FILE),
+            config_file=config_file_path(self.YAML_FILE),
+        )
+
+
+# -- Concrete CDP tests --------------------------------------------------
+
+@pyuvm.test()
+class Cdp_4x4x8_LEN3_identity(CdpTestBase):
+    """4x4x8 INT8 LRN, LEN3 (3-channel window), identity conversion"""
+    YAML_FILE = "cdp_4x4x8_len3_identity.yaml"
+    DAT_FILE  = "cdp_4x4x8_len3_in.dat"
+
+
+@pyuvm.test()
+class Cdp_4x4x8_LEN5(CdpTestBase):
+    """4x4x8 INT8 LRN, LEN5 (5-channel window)"""
+    YAML_FILE = "cdp_4x4x8_len5.yaml"
+    DAT_FILE  = "cdp_4x4x8_len5_in.dat"
+
+
+@pyuvm.test()
+class Cdp_4x4x8_LEN9(CdpTestBase):
+    """4x4x8 INT8 LRN, LEN9 (maximum 9-channel window)"""
+    YAML_FILE = "cdp_4x4x8_len9.yaml"
+    DAT_FILE  = "cdp_4x4x8_len9_in.dat"
