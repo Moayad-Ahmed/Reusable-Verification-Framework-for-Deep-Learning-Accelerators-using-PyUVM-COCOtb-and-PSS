@@ -1,0 +1,49 @@
+# ═══════════════════════════════════════════════════════════════════
+# NVDLA CDP — 4×4 spatial, 8 channels, LEN9 (maximum normalization window)
+#
+# Tests the widest normalization window (9 channels, center ± 4).
+# With only 8 channels, every channel position has significant
+# zero-padding in the square-sum neighborhood.
+#
+#   Window for channel c: [max(0, c-4), min(7, c+4)]
+#     c=0: channels [0, 1, 2, 3, 4]  → 5 active, 4 zero-padded
+#     c=4: channels [0..7]            → 8 active, 1 zero-padded
+#     c=7: channels [3, 4, 5, 6, 7]  → 5 active, 4 zero-padded
+#
+# Pipeline: CDP_RDMA → CvtIn → SqSum → LUT → Mul → CvtOut → WDMA
+# ═══════════════════════════════════════════════════════════════════
+
+test_suite:
+  - name: "NVDLA_CDP_4x4x8_LEN9"
+    description: "4×4×8 INT8 LRN, LEN9 (maximum 9-channel window)"
+
+    layers:
+      - type: "normalization"
+        config:
+          # --- input data cube ---
+          input_shape: [4, 4, 8]        # [H, W, C]
+          data_range: [-3, 3]           # smaller range to keep sqsum moderate
+          data_format: "INT8"
+
+          # --- LRN parameters ---
+          normalz_len: 9                # 9-channel normalization window (max)
+
+          # --- LRN formula params ---
+          k: 1.0
+          alpha: 0.0001
+          beta: 0.75
+
+          # --- input conversion (identity) ---
+          datin_offset: 0
+          datin_scale: 1
+          datin_shifter: 0
+
+          # --- output conversion ---
+          # datout_shifter=8 compensates for Q8.8 LUT format
+          datout_offset: 0
+          datout_scale: 1
+          datout_shifter: 8
+
+          # --- LUT configuration ---
+          lut_le_function: "LINEAR"
+          lut_priority: "LE"

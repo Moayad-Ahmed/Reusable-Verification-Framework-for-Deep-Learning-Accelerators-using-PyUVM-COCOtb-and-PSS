@@ -1,0 +1,57 @@
+# ═══════════════════════════════════════════════════════════════════
+# NVDLA CDP (Channel Data Processor) — 4×4 spatial, 8 channels, LEN3
+#
+# Simplest possible CDP/LRN test:
+#   Input:  4×4 spatial, 8 channels (INT8)  → 1 surface, 128 bytes
+#   Output: 4×4 spatial, 8 channels (INT8)  → 1 surface, 128 bytes
+#
+# LRN configuration:
+#   normalz_len = 3 (3-channel window, center ± 1)
+#   Identity input/output conversion (offset=0, scale=1, shift=0)
+#   LUT generated from k=1.0, alpha=0.0001, beta=0.75
+#
+# Pipeline: CDP_RDMA → CvtIn → SqSum → LUT → Mul → CvtOut → WDMA
+#
+# Golden model:
+#   Stage 1: cvt = input (identity conversion)
+#   Stage 2: sqsum[c] = sum(cvt[j]^2) for j in [c-1, c+1]
+#   Stage 3: lut_out = LUT(sqsum) ≈ 1/(k + alpha*sqsum)^beta
+#   Stage 4: mul_out = cvt * lut_out
+#   Stage 5: output = clamp(round(mul_out), -128, 127)
+# ═══════════════════════════════════════════════════════════════════
+
+test_suite:
+  - name: "NVDLA_CDP_4x4x8_LEN3_identity"
+    description: "4×4×8 INT8 LRN, LEN3 (3-channel window), identity conversion"
+
+    layers:
+      - type: "normalization"
+        config:
+          # --- input data cube ---
+          input_shape: [4, 4, 8]        # [H, W, C]
+          data_range: [-5, 5]           # small values → sqsum fits in LUT range
+          data_format: "INT8"
+
+          # --- LRN parameters ---
+          normalz_len: 3                # 3-channel normalization window
+
+          # --- LRN formula params (for LUT generation) ---
+          k: 1.0
+          alpha: 0.0001
+          beta: 0.75
+
+          # --- input conversion (identity) ---
+          datin_offset: 0
+          datin_scale: 1
+          datin_shifter: 0
+
+          # --- output conversion ---
+          # datout_shifter must be 8 to compensate for Q8.8 LUT format
+          # (LUT stores factor*256, multiply gives input*256, shift>>8 recovers input scale)
+          datout_offset: 0
+          datout_scale: 1
+          datout_shifter: 8
+
+          # --- LUT configuration ---
+          lut_le_function: "LINEAR"
+          lut_priority: "LE"
